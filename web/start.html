@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f7">
+<title>设备激活</title>
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="/assets/apple.css">
+<style>
+  body { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+    padding: 20px; position: relative; overflow: hidden; }
+  .bg-blob { position: fixed; border-radius: 50%; filter: blur(70px); opacity: .55; z-index: -1; }
+  .bg-blob.b1 { width: 46vw; height: 46vw; max-width: 560px; max-height: 560px;
+    background: radial-gradient(circle, rgba(0,122,255,.28), transparent 70%); top: -12%; left: -10%; animation: drift 14s ease-in-out infinite alternate; }
+  .bg-blob.b2 { width: 42vw; height: 42vw; max-width: 520px; max-height: 520px;
+    background: radial-gradient(circle, rgba(52,199,89,.24), transparent 70%); bottom: -14%; right: -8%; animation: drift 17s ease-in-out infinite alternate-reverse; }
+  @keyframes drift { to { transform: translate(40px, 30px) scale(1.08); } }
+  .activate-card { width: 100%; max-width: 400px; padding: 34px 30px calc(28px + env(safe-area-inset-bottom));
+    border-radius: 26px; text-align: center; animation: cp-fade .5s cubic-bezier(.22,1,.36,1) both; }
+  .logo-wrap { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 22px; overflow: hidden;
+    box-shadow: 0 12px 34px rgba(0,122,255,.28); animation: logoIn .9s cubic-bezier(.22,1,.36,1) both; }
+  .logo-wrap img { width: 100%; height: 100%; display: block; }
+  @keyframes logoIn { from { opacity: 0; transform: translateY(14px) scale(.86); } to { opacity: 1; transform: none; } }
+  h1 { font-size: 23px; letter-spacing: -.03em; }
+  .sub { color: var(--text-2); font-size: 14px; margin: 7px 0 26px; }
+  .code-input { text-align: center; font-family: var(--mono); letter-spacing: .18em;
+    font-size: 19px; font-weight: 700; padding: 15px 14px; text-transform: uppercase; }
+  .activate-foot { margin-top: 22px; }
+  .brand-foot { position: fixed; bottom: calc(14px + env(safe-area-inset-bottom)); left: 0; right: 0;
+    text-align: center; font-size: 12px; color: var(--text-3); }
+  .checking { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-2); padding: 30px 0; }
+</style>
+</head>
+<body>
+<div class="bg-blob b1"></div>
+<div class="bg-blob b2"></div>
+
+<div class="card glass activate-card" id="card">
+  <div class="logo-wrap"><img src="/assets/logo.svg" alt="logo" draggable="false" data-protect></div>
+  <h1 id="title">设备激活</h1>
+  <p class="sub" id="subtitle">输入激活码以进入班级积分系统</p>
+
+  <div id="form">
+    <div class="form-row" style="text-align:left">
+      <label class="form-label" for="code">激活码</label>
+      <input id="code" class="form-input code-input" type="text" inputmode="latin" autocomplete="off"
+             maxlength="32" placeholder="请输入激活码">
+    </div>
+    <div class="form-row" style="text-align:left">
+      <label class="form-label" for="dname">设备名称</label>
+      <input id="dname" class="form-input" type="text" maxlength="30" placeholder="如：教室电脑">
+      <p class="form-hint">激活码与本设备绑定，一个激活码仅可使用一次</p>
+    </div>
+    <button id="btn-activate" class="btn btn-primary btn-lg" style="margin-top:6px">
+      <i class="fas fa-key"></i> 激活设备
+    </button>
+  </div>
+
+  <div id="checking" style="display:none">
+    <div class="checking"><span class="spinner"></span><span>正在验证设备…</span></div>
+  </div>
+</div>
+
+<div class="brand-foot">班级积分系统 · points</div>
+
+<script src="/assets/common.js"></script>
+<script>
+CP.applyTitle('设备激活');
+
+const $ = id => document.getElementById(id);
+const codeInput = $('code'), nameInput = $('dname');
+nameInput.value = CP.defaultDeviceName();
+// 注意：不要强制大写——万能激活码含小写字母，由后端统一做大小写归一
+
+function afterActivate() {
+  const next = CP.qs('next');
+  // 激活成功统一先看开场动画，动画结束进入正式页
+  location.replace('/ae' + (next ? '?next=' + encodeURIComponent(next) : ''));
+}
+
+async function activate() {
+  const code = codeInput.value.trim();
+  const deviceName = nameInput.value.trim() || CP.defaultDeviceName();
+  if (!code) { CP.toast('请输入激活码', 'warn'); codeInput.focus(); return; }
+  $('btn-activate').disabled = true;
+  try {
+    const [uuid, fingerprint] = [CP.getDeviceUUID(), await CP.deviceFingerprint()];
+    const r = await CP.api('/device/activate', {
+      method: 'POST',
+      body: { code, deviceName, uuid, fingerprint }
+    });
+    CP.setDeviceToken(r.token);
+    CP.toast('激活成功', 'success');
+    setTimeout(afterActivate, 500);
+  } catch (e) {
+    CP.failToast(e, '激活失败');
+    $('btn-activate').disabled = false;
+  }
+}
+$('btn-activate').addEventListener('click', activate);
+codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') activate(); });
+nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') activate(); });
+
+(async function init() {
+  // 已激活且设备有效：直接进入动画
+  if (CP.getDeviceToken()) {
+    $('form').style.display = 'none';
+    $('checking').style.display = 'block';
+    $('subtitle').textContent = '检测到已有设备凭证';
+    try {
+      const r = await CP.api('/device/verify', { handle401: false });
+      if (r.valid) { afterActivate(); return; }
+      CP.clearDeviceToken();
+    } catch (e) { /* 网络异常时仍允许尝试激活，写操作会提示网络问题 */ }
+    $('form').style.display = 'block';
+    $('checking').style.display = 'none';
+  }
+  setTimeout(() => codeInput.focus(), 300);
+})();
+</script>
+</body>
+</html>

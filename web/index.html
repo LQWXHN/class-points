@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f7">
+<title>班级积分系统</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=54">
+<link rel="stylesheet" href="/assets/apple.css?v=54">
+<link rel="stylesheet" href="/assets/page-index.css?v=54">
+</head>
+<body>
+
+<!-- 移动端顶栏 -->
+<header class="mobile-topbar">
+  <button id="mobile-btn" class="mobile-btn"><i class="fas fa-bars"></i></button>
+  <div class="flex1" style="text-align:center;font-weight:700" id="m-title">班级积分系统</div>
+  <button id="sys-ann-bell-fe" class="icon-btn" style="position:relative" title="系统公告"><i class="fas fa-bell"></i></button>
+  <button id="more-menu-btn" class="icon-btn" title="更多"><i class="fas fa-grip"></i></button>
+  <button id="mobile-rank-btn" class="icon-btn mobile-rank-btn"><i class="fas fa-ranking-star"></i></button>
+</header>
+<div id="drawer-overlay" class="drawer-overlay"></div>
+<div id="rank-overlay" class="rank-overlay"></div>
+
+<div class="app-shell">
+  <!-- 左栏 -->
+  <aside class="side left" id="sidebar">
+    <div class="side-scroll">
+      <div class="side-logo" id="side-logo">
+        <img src="/assets/logo.svg" alt="logo" data-protect>
+        <div>
+          <div class="logo-text" id="logo-text">班级积分</div>
+          <div class="logo-sub">Class Points</div>
+        </div>
+      </div>
+
+      <div class="card glass">
+        <div class="card-title"><i class="fas fa-chart-pie"></i> 数据统计</div>
+        <div class="stat-grid">
+          <div class="stat-tile"><div class="v" id="ls-groups">0</div><div class="k">小组数</div></div>
+          <div class="stat-tile"><div class="v" id="ls-students">0</div><div class="k">学生数</div></div>
+          <div class="stat-tile"><div class="v" id="ls-avg">0</div><div class="k">平均积分</div></div>
+          <div class="stat-tile"><div class="v" id="ls-max">0</div><div class="k">最高积分</div></div>
+        </div>
+      </div>
+
+      <div class="nav-stack">
+        <button class="nav-entry" onclick="location.href='/history'">
+          <i class="fas fa-clock-rotate-left"></i>
+          <span class="t">历史记录</span>
+          <i class="fas fa-chevron-right chev"></i>
+        </button>
+      </div>
+    </div>
+    <div class="conn-status">
+      <span id="conn-dot" class="dot-on"></span><span id="conn-text">已连接</span>
+      <div id="ext-links" class="ext-links"></div>
+    </div>
+  </aside>
+
+  <!-- 中栏 -->
+  <main class="flex1">
+    <div class="top-stats mb-16">
+      <div class="card top-stat">
+        <div class="ts-ic b1"><i class="fas fa-users"></i></div>
+        <div class="ts-k">小组数量</div>
+        <div class="ts-v" id="top-groups">0</div>
+      </div>
+      <div class="card top-stat">
+        <div class="ts-ic b2"><i class="fas fa-user-graduate"></i></div>
+        <div class="ts-k">学生总数</div>
+        <div class="ts-v" id="top-students">0</div>
+      </div>
+      <div class="card top-stat">
+        <div class="ts-ic b3"><i class="fas fa-star"></i></div>
+        <div class="ts-k">平均积分</div>
+        <div class="ts-v" id="top-avg">0</div>
+      </div>
+      <div class="card top-stat">
+        <div class="ts-ic b4"><i class="fas fa-trophy"></i></div>
+        <div class="ts-k">最高积分</div>
+        <div class="ts-v" id="top-max">0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="segmented">
+          <button id="tab-stu" class="active"><i class="fas fa-user-graduate"></i> 学生信息</button>
+          <button id="tab-grp"><i class="fas fa-users"></i> 小组信息</button>
+        </div>
+        <div class="spacer flex1"></div>
+        <button id="btn-batch" class="btn btn-soft btn-sm"><i class="fas fa-check-square"></i> 批量选择</button>
+        <div class="search">
+          <i class="fas fa-search"></i>
+          <input type="text" id="search-input" class="form-input" placeholder="搜索姓名或学号…" autocomplete="off">
+        </div>
+      </div>
+
+      <div id="batch-bar" class="batch-bar" style="display:none">
+        <div class="bb-t">已选 <span class="bb-n" id="batch-count">0</span> 名学生</div>
+        <div class="bb-acts">
+          <button id="sel-all" class="btn btn-sm">全选</button>
+          <button id="sel-clear" class="btn btn-sm">清空</button>
+          <button id="batch-add" class="btn btn-success btn-sm"><i class="fas fa-plus"></i> 批量加分</button>
+          <button id="batch-sub" class="btn btn-danger btn-sm"><i class="fas fa-minus"></i> 批量减分</button>
+        </div>
+      </div>
+
+      <div id="cards" class="cards students"></div>
+    </div>
+  </main>
+
+  <!-- 右栏：排行榜 -->
+  <aside class="side right" id="right-panel">
+    <div class="side-scroll">
+      <div class="rank-head">
+        <h2>排行榜</h2>
+        <div style="display:flex;gap:6px">
+          <button id="more-menu-btn-desktop" class="icon-btn" title="更多"><i class="fas fa-grip"></i></button>
+          <button id="tier-help" class="icon-btn" title="段位说明"><i class="fas fa-question"></i></button>
+        </div>
+      </div>
+      <div class="segmented" style="display:flex;margin-bottom:12px">
+        <button id="rk-stu" class="active" style="flex:1"><i class="fas fa-user"></i> 个人</button>
+        <button id="rk-grp" style="flex:1"><i class="fas fa-users"></i> 小组</button>
+        <button id="rk-tier" style="flex:1"><i class="fas fa-crown"></i> 段位</button>
+        <button id="rk-biw" style="flex:1"><i class="fas fa-calendar-week"></i> 双周</button>
+      </div>
+      <div id="rank-list" class="rank-list"></div>
+
+      <div class="hist-section">
+        <div class="hist-head"><i class="fas fa-history"></i> 最近操作</div>
+        <div id="hist-list" class="hist-list"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script src="/assets/common.js?v=54"></script>
+<script src="/assets/page-index.js?v=54"></script>
+</body>
+</html>

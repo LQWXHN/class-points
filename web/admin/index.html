@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>班级积分系统 · 后台</title>
+<link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=54">
+<link rel="stylesheet" href="/assets/apple.css?v=54">
+<link rel="stylesheet" href="/admin/admin.css?v=54">
+</head>
+<body>
+
+<!-- ============ 登录屏 ============ -->
+<div id="login-screen" class="login-wrap">
+  <div class="card login-card scale-in">
+    <div class="login-brand">
+      <div class="login-brand-ic"><i class="fas fa-chalkboard-user"></i></div>
+      <h1>班级积分系统</h1>
+      <p>后台管理</p>
+    </div>
+
+    <!-- 首次设置密码 -->
+    <div id="setup-panel" class="hidden">
+      <p class="login-tip">首次使用 <b id="setup-user-label">teacher</b>，请设置密码</p>
+      <div class="form-row">
+        <label class="form-label">设置密码</label>
+        <input type="password" id="setup-pwd" class="form-input" placeholder="至少 4 位" autocomplete="new-password">
+      </div>
+      <div class="form-row">
+        <label class="form-label">确认密码</label>
+        <input type="password" id="setup-pwd2" class="form-input" placeholder="再次输入" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary btn-block btn-lg" onclick="App.doSetup()">设置密码并进入</button>
+    </div>
+
+    <!-- 密码登录（默认可见，慢网下不空白） -->
+    <div id="login-panel">
+      <div class="form-row">
+        <label class="form-label">账户</label>
+        <input id="login-username" class="form-input" placeholder="用户名" autocomplete="username">
+      </div>
+      <div class="form-row">
+        <label class="form-label">密码</label>
+        <input type="password" id="login-pwd" class="form-input" placeholder="密码" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary btn-block btn-lg" onclick="App.doLogin()">登 录</button>
+      <p class="login-foot"><a href="#" onclick="App.showForgot();return false;">忘记密码？</a></p>
+    </div>
+
+    <!-- 忘记密码 -->
+    <div id="forgot-panel" class="hidden">
+      <p class="login-tip">验证码将发送到救援邮箱</p>
+      <div class="form-row">
+        <label class="form-label">账户</label>
+        <input id="forgot-username" class="form-input" value="teacher">
+      </div>
+      <div class="form-row">
+        <label class="form-label">救援邮箱</label>
+        <div class="form-inline" style="gap:8px">
+          <input id="forgot-email" type="email" class="form-input" style="margin-bottom:0">
+          <button class="btn btn-soft" onclick="App.sendCode()">发送验证码</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">验证码</label>
+        <input id="forgot-code" class="form-input" placeholder="6 位验证码">
+      </div>
+      <div class="form-row">
+        <label class="form-label">新密码</label>
+        <input type="password" id="forgot-newpwd" class="form-input" placeholder="至少 4 位" autocomplete="new-password">
+      </div>
+      <div class="form-inline" style="gap:8px">
+        <button class="btn" style="flex:1" onclick="App.showLogin()">返回</button>
+        <button class="btn btn-primary" style="flex:1" onclick="App.doReset()">重置密码</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 后台主界面 ============ -->
+<div id="admin-app" class="admin-grid" style="display:none">
+  <div class="mobile-topbar">
+    <button class="mobile-btn" id="mb-btn"><i class="fas fa-bars"></i></button>
+    <span id="topbar-title">后台管理</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="icon-btn" id="mb-more-menu-btn" onclick="App.moreMenu(this)" title="更多" style="position:relative">
+      <i class="fas fa-grip"></i>
+    </button>
+    <button class="icon-btn" id="mb-sys-ann-bell" style="position:relative" onclick="App.switchPage('system-announcements')" title="系统公告">
+      <i class="fas fa-bell"></i>
+    </button>
+  </div>
+  <div class="drawer-overlay" id="overlay"></div>
+
+  <aside class="side left" id="sidebar">
+    <div class="side-logo" onclick="App.goHome()">
+      <div class="logo-mark"><i class="fas fa-chalkboard-user"></i></div>
+      <div class="min-w-0">
+        <div class="logo-text" id="logo-text">后台管理</div>
+        <div class="logo-sub" id="logo-sub">Admin</div>
+      </div>
+    </div>
+    <div class="side-scroll" id="nav-scroll"></div>
+    <div class="side-ext-links" id="side-ext-links"></div>
+    <div class="side-user">
+      <div class="su-av" id="user-avatar" onclick="App.avatarMenu(event)" style="cursor:pointer">T</div>
+      <div class="flex1 min-w-0">
+        <div class="su-name" id="user-name">--</div>
+        <div class="su-role" id="user-role">--</div>
+      </div>
+      <button class="icon-btn" onclick="App.moreMenu(this)" title="更多"><i class="fas fa-grip"></i></button>
+    </div>
+  </aside>
+
+  <main class="admin-main" id="main-content"></main>
+</div>
+
+<script src="/assets/common.js?v=54"></script>
+<script src="/admin/admin.js?v=54"></script>
+</body>
+</html>

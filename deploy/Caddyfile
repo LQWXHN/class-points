@@ -1,0 +1,11 @@
+# Caddyfile —— 家里主站反代
+# 把 points.example.com 反代到本机 Node（127.0.0.1:8787），自动申请/续期 HTTPS 证书
+# 用法：替换 /etc/caddy/Caddyfile 后  sudo systemctl reload caddy
+
+points.example.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:8787 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+    }
+}

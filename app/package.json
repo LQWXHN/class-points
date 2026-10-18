@@ -1,0 +1,23 @@
+{
+  "name": "class-points-app",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "班级积分系统 v4.0 — Hono 同构后端（Node + Cloudflare Workers）",
+  "scripts": {
+    "start": "node src/node.js",
+    "dev": "node --watch src/node.js",
+    "sync:once": "node src/sync/run-once.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "better-sqlite3": "^11.8.1",
+    "hono": "^4.6.15"
+  },
+  "devDependencies": {
+    "wrangler": "^4.149.0"
+  }
+}

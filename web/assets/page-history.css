@@ -1,0 +1,42 @@
+/* /history.html 专用样式 */
+.history-wrap { max-width: 1080px; margin: 0 auto; padding: 14px; }
+.filter-card { padding: 14px 16px; margin-bottom: 14px; }
+.filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.filter-row + .filter-row { margin-top: 12px; }
+.filter-row .form-input { width: auto; }
+.date-input { width: 150px; }
+.kw-input { flex: 1; min-width: 180px; }
+.mobile-cards { display: none; }
+
+/* 分值着色 */
+.pt-add { color: var(--green); font-weight: 800; font-variant-numeric: tabular-nums; }
+.pt-sub { color: var(--red); font-weight: 800; font-variant-numeric: tabular-nums; }
+.pt-sys { color: var(--text-2); font-weight: 700; }
+.type-chip { display: inline-flex; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+
+/* 移动端流水小卡 */
+.mrec { padding: 12px 14px; margin-bottom: 10px; }
+.mrec-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.mrec-name { font-size: 14px; font-weight: 700; }
+.mrec-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.mrec-reason { font-size: 13px; color: var(--text-2); margin-top: 7px; }
+.mrec-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); margin-top: 8px; }
+
+.load-more { width: 100%; margin: 6px 0 4px; }
+.load-state { text-align: center; font-size: 13px; color: var(--text-3); padding: 10px 0 4px; }
+
+@media (max-width: 760px) {
+  .desktop-table { display: none; }
+  .mobile-cards { display: block; }
+}
+@media (max-width: 640px) {
+  .filter-row { flex-direction: column; align-items: stretch; }
+  .filter-row > .date-input { width: 50%; }
+  .filter-row { flex-wrap: wrap; }
+  .filter-row .date-input:first-of-type { width: calc(50% - 16px); }
+  .filter-row .date-input:last-of-type { width: 50%; }
+  .filter-row .text-3 { width: 100%; text-align: center; }
+  .filter-row > div { flex: 1 1 100%; }
+  body { overflow-x: hidden; }
+  .history-wrap { padding: 10px; }
+}

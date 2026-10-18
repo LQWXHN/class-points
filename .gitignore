@@ -1,0 +1,52 @@
+# 运行时数据（迁移/运行后生成，不入库）
+data/*
+!data/uploads/
+!data/backups/
+data/uploads/*
+!data/uploads/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
+
+# 依赖
+node_modules/
+scripts/node_modules/
+scripts/.npm-cache/
+
+# wrangler 本地状态与日志（真实配置含数据库 ID/自定义域名，不入库，用 wrangler.example.toml 模板）
+.wrangler/
+.wrangler-config/
+app/wrangler.toml
+app/wrangler.dev.toml
+*.log
+
+# 运行时配置（可能含 SYNC_SECRET/万能码）
+data/config.json
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# 同步/冒烟测试的临时数据目录（app/data-*）
+app/data-*/
+
+# 迁移中间产物
+scripts/tmp/
+
+# 打包产物与交付压缩包
+*.zip
+*.tar.gz
+win32-x64/
+dist/
+out/
+
+# 客户端（已删除，保险规则）
+client-app/
+notify-desktop/
+
+# 环境变量与密钥
+.env
+.env.*
+*.env
+
+# 系统
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+[Unit]
+Description=班级积分系统 v4.0 家里主站 (Node)
+After=network.target
+
+[Service]
+Type=simple
+# 用普通用户运行（不要 root），按实际用户名改
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/class-points/app
+ExecStart=/usr/bin/node src/node.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+# 数据目录与端口/同步密钥（也可写在 data/config.json，二选一）
+Environment=PORT=8787
+EnvironmentFile=-/opt/class-points/data/secrets.env
+
+[Install]
+WantedBy=multi-user.target

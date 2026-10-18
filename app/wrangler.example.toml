@@ -1,0 +1,48 @@
+# ============================================================
+# 班级积分系统 —— Cloudflare 备用站 Worker 配置模板
+# 部署：cd app && cp wrangler.example.toml wrangler.toml，再填入自己的 ID
+# ============================================================
+name = "class-points-app"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 静态资源：未匹配到的请求由 worker.js 接管重写
+# 注意：不要配置 single-page-application = true，否则会绕过我们的重写逻辑
+[assets]
+directory = "../web"
+
+# ---------------- D1 数据库 ----------------
+# 首次部署前先建库：
+#   wrangler d1 create class-points-db
+# 把输出里的 database_id 回填到下面
+[[d1_databases]]
+binding = "DB"
+database_name = "class-points-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# ---------------- R2 备份桶 ----------------
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "class-points-backup"
+
+# ---------------- 环境变量 ----------------
+[vars]
+SITE_ROLE = "worker"
+
+# 同步密钥（与家里主站 SYNC_SECRET 完全一致），用 secret 方式注入，不要写在这里：
+#   wrangler secret put SYNC_SECRET
+# 生成：openssl rand -hex 32
+
+# ---------------- 自定义域名（改成你自己的域名，或先用 workers.dev 子域名） ----------------
+[[routes]]
+pattern = "points1.example.com"
+custom_domain = true
+
+# ---------------- 观测日志 ----------------
+[observability]
+enabled = true
+
+# ---------------- Cron 触发器（每分钟同步主站） ----------------
+[triggers]
+crons = ["* * * * *"]

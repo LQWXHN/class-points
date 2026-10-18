@@ -1,0 +1,15 @@
+# cloudflared 配置 —— 无公网 IP 时把域名隧道到家里本机 Node
+# 用法：
+#   1) cloudflared tunnel login
+#   2) cloudflared tunnel create class-points
+#   3) cloudflared tunnel route dns class-points points.example.com
+#   4) 把本文件放到 /etc/cloudflared/config.yml
+#   5) sudo cloudflared service install
+
+tunnel: <TUNNEL_UUID>   # 上一步 create 的输出
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: points.example.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404

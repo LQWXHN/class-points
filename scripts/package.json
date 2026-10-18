@@ -1,0 +1,9 @@
+{
+  "name": "class-points-scripts",
+  "private": true,
+  "type": "module",
+  "description": "迁移与核对脚本的依赖（better-sqlite3 仅用于把迁移结果写盘/校验）",
+  "dependencies": {
+    "better-sqlite3": "^11.3.0"
+  }
+}
