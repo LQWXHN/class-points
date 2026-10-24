@@ -310,12 +310,13 @@
     let ext = (window.CP && CP.bootstrap && CP.bootstrap.ext_links) || appData.config.ext_links || {};
     if (typeof ext === 'string') { try { ext = JSON.parse(ext); } catch (e) { ext = {}; } }
     const items = [];
+    items.push({ url: '/', icon: 'fas fa-display', label: '前台首页' });
     if (ext.github) items.push({ url: ext.github, icon: 'fa-brands fa-github', label: 'GitHub' });
     if (ext.home) items.push({ url: ext.home, icon: 'fas fa-house', label: '主页' });
     if (ext.blog) items.push({ url: ext.blog, icon: 'fas fa-blog', label: '博客' });
     if (!items.length) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="side-ext-links-row">` + items.map(it =>
-      `<a href="${CP.esc(it.url)}" target="_blank" title="${CP.esc(it.label)}"><i class="${it.icon}"></i></a>`).join('') + `</div>`;
+      `<a href="${CP.esc(it.url)}"${it.url.startsWith('/') ? '' : ' target="_blank"'} title="${CP.esc(it.label)}"><i class="${it.icon}"></i></a>`).join('') + `</div>`;
   }
   function closeSidebar() {
     const sb = $('sidebar'); if (sb) sb.classList.remove('open');
@@ -579,11 +580,38 @@
   /* ============================================================
      小组信息
      ============================================================ */
-  const GROUP_COLORS = ['#007aff', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#5ac8fa'];
+  const GROUP_COLORS = ['#007aff','#34c759','#ff9500','#ff3b30','#af52de','#5ac8fa','#5856d6','#ff2d55','#a2845e','#8e8e93','#30b0c7','#bf5af2'];
   function colorPickerHtml(name, sel) {
+    // 末尾追加"自定义"：彩虹渐变圆点覆盖透明 color input
+    const selIsCustom = sel && !GROUP_COLORS.includes(sel);
     return `<div class="color-pick">` + GROUP_COLORS.map(c => `
       <label><input type="radio" name="${name}" value="${c}" ${c === sel ? 'checked' : ''}>
-        <span class="dot" style="background:${c}"></span></label>`).join('') + `</div>`;
+        <span class="dot" style="background:${c}"></span></label>`).join('') + `
+      <label style="position:relative"><input type="radio" name="${name}" value="__custom__" ${selIsCustom ? 'checked' : ''} style="position:absolute;opacity:0;pointer-events:none">
+        <span class="dot" style="background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)"></span>
+        <input type="color" id="${name}-custom-input" value="${selIsCustom ? sel : '#007aff'}"
+          style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="App.pickColor('${name}')"></label>
+    </div>`;
+  }
+  function pickColor(name) {
+    // 自定义被选中时：勾选自定义 radio 并把 color input 值同步过去
+    const radio = document.querySelector(`input[name="${name}"][value="__custom__"]`);
+    if (radio) radio.checked = true;
+  }
+  function readColor(name) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    if (!checked) return GROUP_COLORS[0];
+    if (checked.value === '__custom__') {
+      return $(`${name}-custom-input`).value || GROUP_COLORS[0];
+    }
+    return checked.value;
+  }
+  // 小组头像 HTML：有 avatar 用 avatarHTML + 组色头像框；无则 fa-users 图标 + 10% 组色底
+  function groupAvatarHtml(g, size = 40, radius = '10px') {
+    if (g.avatar) {
+      return CP.avatarHTML(g.avatar, { size, radius, border: g.color });
+    }
+    return `<div class="grp-icon" style="width:${size}px;height:${size}px;border-radius:${radius};background:${g.color}1c;color:${g.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>`;
   }
   function renderGroupsPage() {
     $('main-content').innerHTML = `
@@ -611,7 +639,7 @@
             return `<div class="grp-card ${sel ? 'sel' : ''}" style="--c:${g.color}" ${clickAttr}>
               <div class="grp-head">
                 <div class="flex aic gap-10" style="min-width:0">
-                  <div class="grp-icon" style="background:${g.color}1c;color:${g.color}"><i class="fas fa-users"></i></div>
+                  ${groupAvatarHtml(g)}
                   <div style="min-width:0">
                     <div style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${CP.esc(g.name)}<span class="badge" style="background:${g.color}1c;color:${g.color}">第${idx + 1}组</span></div>
                     <div class="text-3" style="font-size:11px;margin-top:2px">${members.length} 名成员 · 平均 ${avg.toFixed(2)} 分</div>
@@ -650,14 +678,30 @@
       <div class="form-row"><label class="form-label">小组名称 *</label><input id="ng-name" class="form-input"></div>
       <div class="form-row"><label class="form-label">口号（可选）</label><input id="ng-sig" class="form-input"></div>
       <div class="form-row"><label class="form-label">颜色</label>${colorPickerHtml('ng-color', GROUP_COLORS[0])}</div>
+      <div class="form-row"><label class="form-label">头像（Emoji 或图片 URL，留空=默认）</label><input id="ng-avatar" class="form-input" placeholder="如 🐯 或 /api/file/uploads/xxx.png"></div>
+      <div class="form-row"><label class="form-label">或上传头像图片</label><input id="ng-avatar-file" type="file" accept="image/*" onchange="App.uploadGroupAvatar('ng-avatar')"></div>
       <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doAddGroup()">添加</button></div>`);
+  }
+  async function uploadGroupAvatar(inputId) {
+    const f = document.getElementById(inputId + '-file');
+    const file = f && f.files && f.files[0];
+    if (!file) return;
+    try {
+      const token = localStorage.staffToken || localStorage.token || '';
+      const fd = new FormData(); fd.append('file', file);
+      const r = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + token } });
+      const j = await r.json();
+      if (j.ok) { $(inputId).value = j.url; CP.toast('头像已上传', 'success'); }
+      else CP.failToast(j, '上传失败');
+    } catch (e) { CP.failToast(e, '上传失败'); }
   }
   async function doAddGroup() {
     const name = $('ng-name').value.trim();
     if (!name) return CP.toast('请输入名称', 'warn');
-    const color = (document.querySelector('input[name="ng-color"]:checked') || {}).value || GROUP_COLORS[0];
+    const color = readColor('ng-color');
+    const avatar = ($('ng-avatar').value || '').trim();
     try {
-      await CP.api('/groups', { method: 'POST', body: { name, color, signature: $('ng-sig').value.trim() } });
+      await CP.api('/groups', { method: 'POST', body: { name, color, signature: $('ng-sig').value.trim(), avatar } });
       CP.toast('添加成功', 'success'); CP.closeModal(); switchPage('groups');
     } catch (e) { CP.failToast(e, '添加失败'); }
   }
@@ -667,18 +711,23 @@
       <div class="form-row"><label class="form-label">小组名称</label><input id="eg-name" class="form-input" value="${CP.esc(g.name)}"></div>
       <div class="form-row"><label class="form-label">口号（可选）</label><input id="eg-sig" class="form-input" value="${CP.esc(g.signature || '')}"></div>
       <div class="form-row"><label class="form-label">颜色</label>${colorPickerHtml('eg-color', g.color)}</div>
+      <div class="form-row"><label class="form-label">头像（Emoji 或图片 URL，留空=默认）</label><input id="eg-avatar" class="form-input" value="${CP.esc(g.avatar || '')}"></div>
+      <div class="form-row"><label class="form-label">或上传头像图片</label><input id="eg-avatar-file" type="file" accept="image/*" onchange="App.uploadGroupAvatar('eg-avatar')"></div>
       <div class="modal-foot">
+        <button class="btn btn-soft" onclick="App.resetGroupAvatar()">恢复默认头像</button>
         <button class="btn btn-danger" onclick="App.doDelGroup(${id})">删除</button>
         <button class="btn" onclick="CP.closeModal()">取消</button>
         <button class="btn btn-primary" onclick="App.doUpdateGroup(${id})">保存</button>
       </div>`);
   }
+  function resetGroupAvatar() { const i = document.getElementById('eg-avatar'); if (i) i.value = ''; CP.toast('已清空头像', 'success'); }
   async function doUpdateGroup(id) {
     const name = $('eg-name').value.trim();
     if (!name) return CP.toast('请输入名称', 'warn');
-    const color = (document.querySelector('input[name="eg-color"]:checked') || {}).value || GROUP_COLORS[0];
+    const color = readColor('eg-color');
+    const avatar = ($('eg-avatar').value || '').trim();
     try {
-      await CP.api(`/groups/${id}`, { method: 'PUT', body: { name, color, signature: $('eg-sig').value.trim() } });
+      await CP.api(`/groups/${id}`, { method: 'PUT', body: { name, color, signature: $('eg-sig').value.trim(), avatar } });
       CP.toast('保存成功', 'success'); CP.closeModal(); switchPage('groups');
     } catch (e) { CP.failToast(e, '保存失败'); }
   }
@@ -713,11 +762,14 @@
     const renderList = (list, type) => {
       const selSet = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub;
       if (!list.length) return '<div class="empty"><i class="fas fa-inbox"></i><p>暂无规则</p></div>';
-      return `<div class="rule-list">` + list.map(r => {
+      return `<div class="rule-list" data-rtype="${type}">` + list.map((r, idx) => {
         const builtin = !!r.is_builtin;
         const pts = type === 'add' ? `+${r.points}` : `-${r.points}`;
         return `
-        <div class="rule-row" ${builtin ? 'style="opacity:.55"' : ''}>
+        <div class="rule-row" draggable="true" data-uid="${r.uid}" data-type="${type}" data-idx="${idx}"
+          ondragstart="App.dragRuleStart(event,'${type}')" ondragover="App.dragRuleOver(event,'${type}')" ondrop="App.dropRule(event,'${type}')" ondragend="App.dragRuleEnd(event)"
+          ${builtin ? 'style="opacity:.55"' : ''}>
+          <i class="fas fa-grip-vertical" style="color:var(--text-3);margin-right:6px;cursor:grab;font-size:12px"></i>
           <input type="checkbox" style="width:16px;height:16px;flex:none" ${builtin || !selSet ? 'disabled' : (selSet.has(r.id) ? 'checked' : '')} onchange="App.toggleRuleSel('${type}',${r.id},this.checked)">
           <div class="rule-reason">${CP.esc(r.reason)} ${builtin ? '<span class="badge" style="font-size:10px;background:var(--fill);color:var(--text-3)">内置</span>' : ''}</div>
           <div class="rule-pts ${type}">${pts}</div>
@@ -753,6 +805,60 @@
     </div>`;
   }
   function toggleRuleSel(type, id, checked) { const s = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub; if (checked) s.add(id); else s.delete(id); }
+
+  // ---- 规则拖拽排序（同 type 列表内） ----
+  let _dragRuleUid = null;
+  function dragRuleStart(e, type) {
+    const row = e.currentTarget;
+    _dragRuleUid = row.dataset.uid;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', _dragRuleUid); } catch {}
+    row.style.opacity = '0.4';
+  }
+  function dragRuleOver(e, type) {
+    if (!_dragRuleUid) return;
+    const row = e.currentTarget;
+    if (row.dataset.type !== type || row.dataset.uid === _dragRuleUid) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    row.style.background = 'var(--fill)';
+  }
+  async function dropRule(e, type) {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.style.background = '';
+    if (!_dragRuleUid || target.dataset.type !== type || target.dataset.uid === _dragRuleUid) return;
+    // 取当前该 type 列表 DOM 顺序
+    const list = target.parentElement;
+    const rows = Array.from(list.querySelectorAll('.rule-row'));
+    const dragIdx = rows.findIndex(r => r.dataset.uid === _dragRuleUid);
+    const targetIdx = rows.findIndex(r => r.dataset.uid === target.dataset.uid);
+    if (dragIdx < 0 || targetIdx < 0) return;
+    // 重排 DOM（乐观）
+    if (dragIdx < targetIdx) list.insertBefore(rows[dragIdx], target.nextSibling);
+    else list.insertBefore(rows[dragIdx], target);
+    // 提交：重新计算 sort_order
+    const newRows = Array.from(list.querySelectorAll('.rule-row'));
+    const orders = newRows.map((r, i) => ({ uid: r.dataset.uid, sort_order: i + 1 }));
+    _dragRuleUid = null;
+    try {
+      await CP.api('/rules/reorder', { method: 'POST', body: { orders } });
+      // 同步本地 appData
+      for (const o of orders) {
+        const r = appData.rules.find(x => x.uid === o.uid);
+        if (r) r.sort_order = o.sort_order;
+      }
+      CP.toast('排序已保存', 'success');
+    } catch (err) {
+      CP.failToast(err, '排序保存失败');
+      switchPage('rules');
+    }
+  }
+  function dragRuleEnd(e) {
+    e.currentTarget.style.opacity = '';
+    document.querySelectorAll('.rule-row').forEach(r => r.style.background = '');
+    _dragRuleUid = null;
+  }
   async function batchDelRules(type) {
     const s = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub;
     const ids = Array.from(s);
@@ -1123,11 +1229,17 @@
       const pos = i + 1;
       const dv = Number(r.delta_avg) || 0;
       const up = dv >= 0;
+      const gAv = (appData.groups.find(g => g.name === r.group_name) || {}).avatar;
+      const avHTML = gAv
+        ? (CP.resolveAvatar(gAv).img
+          ? `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;overflow:hidden;flex:none;border:2px solid ${r.color || '#8e8e93'}"><img src="${CP.esc(CP.resolveAvatar(gAv).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
+          : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;flex:none;border:2px solid ${r.color || '#8e8e93'};display:flex;align-items:center;justify-content:center;font-size:14px;background:${(r.color || '#8e8e93')}1c">${CP.esc(gAv)}</div>`)
+        : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${r.color || '#8e8e93'}1c;color:${r.color || '#8e8e93'};flex:none"><i class="fas fa-users"></i></div>`;
       return `<div class="rank-item">
         <div class="rk-pos ${pos <= 3 ? 'p' + pos : ''}">${pos}</div>
-        <div class="rk-av" style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${r.color || '#8e8e93'}1c;color:${r.color || '#8e8e93'};flex:none"><i class="fas fa-users"></i></div>
+        ${avHTML}
         <div class="rk-info"><div class="rk-name">${CP.esc(r.group_name)}</div>
-          <div class="rk-sub">${r.member_count} 人 · 总变化 ${r.total_delta}</div></div>
+          <div class="rk-sub">${r.member_count} 人 · 平均分 ${Number(r.avg_start).toFixed(2)} → ${Number(r.avg_end).toFixed(2)} · 总变化 ${r.total_delta}</div></div>
         <div class="rk-pts" style="color:${up ? 'var(--green)' : 'var(--red)'}">${up ? '+' : ''}${dv.toFixed(2)}</div>
       </div>`;
     }).join('') + `</div>`;
@@ -1162,9 +1274,14 @@
       if (!gs.length) { c.innerHTML = '<div class="empty"><i class="fas fa-users"></i><p>暂无小组</p></div>'; return; }
       c.innerHTML = `<div class="rank-list">` + gs.map((g, i) => {
         const pos = i + 1;
+        const avHTML = g.avatar
+          ? (CP.resolveAvatar(g.avatar).img
+            ? `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;overflow:hidden;flex:none;border:2px solid ${g.color}"><img src="${CP.esc(CP.resolveAvatar(g.avatar).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
+            : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;flex:none;border:2px solid ${g.color};display:flex;align-items:center;justify-content:center;font-size:14px;background:${g.color}1c">${CP.esc(g.avatar)}</div>`)
+          : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${g.color}1c;color:${g.color};flex:none"><i class="fas fa-users"></i></div>`;
         return `<div class="rank-item">
           <div class="rk-pos ${pos <= 3 ? 'p' + pos : ''}">${pos}</div>
-          <div class="rk-av" style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${g.color}1c;color:${g.color};flex:none"><i class="fas fa-users"></i></div>
+          ${avHTML}
           <div class="rk-info">
             <div class="rk-name">${CP.esc(g.name)} <span class="badge" style="background:${g.color}1c;color:${g.color}">第${g.origIdx + 1}组</span></div>
             <div class="rk-sub">${g.count} 名成员 · 平均</div>
@@ -1332,46 +1449,58 @@
      数据备份
      ============================================================ */
   function renderBackupPage() {
+    uiState.backupSide = uiState.backupSide || 'server';
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header">
         <h2 class="page-title" style="margin:0">数据备份</h2>
         <span class="spacer"></span>
-        <button class="btn btn-primary" onclick="App.doBackupCreate()"><i class="fas fa-cloud-arrow-up"></i> 立即备份</button>
         <button class="btn btn-soft" onclick="App.doBackupDownload()"><i class="fas fa-download"></i> 下载当前数据</button>
         <button class="btn btn-soft" onclick="App.showRestoreModal()"><i class="fas fa-upload"></i> 从本地文件恢复</button>
+      </div>
+      <div class="seg-tabs" style="display:flex;gap:6px;background:var(--fill);padding:4px;border-radius:12px;margin-bottom:14px">
+        <button class="seg-tab ${uiState.backupSide==='server'?'active':''}" data-side="server" onclick="App.switchBackupSide('server')" style="flex:1;padding:8px;border:none;background:transparent;border-radius:9px;font-size:13px;cursor:pointer;color:${uiState.backupSide==='server'?'var(--text)':'var(--text-3)'};${uiState.backupSide==='server'?'background:var(--bg-elevated);box-shadow:var(--shadow);font-weight:600':''}"><i class="fas fa-display"></i> 服务器</button>
+        <button class="seg-tab ${uiState.backupSide==='cloud'?'active':''}" data-side="cloud" onclick="App.switchBackupSide('cloud')" style="flex:1;padding:8px;border:none;background:transparent;border-radius:9px;font-size:13px;cursor:pointer;color:${uiState.backupSide==='cloud'?'var(--text)':'var(--text-3)'};${uiState.backupSide==='cloud'?'background:var(--bg-elevated);box-shadow:var(--shadow);font-weight:600':''}"><i class="fas fa-cloud"></i> Cloudflare</button>
       </div>
       <div id="bk-box"><div class="empty"><span class="spinner"></span><p style="margin-top:10px">加载中…</p></div></div>
     </div>`;
     loadBackupList();
   }
+  function switchBackupSide(side) {
+    uiState.backupSide = side;
+    renderBackupPage();
+  }
   async function loadBackupList() {
     const box = $('bk-box'); if (!box) return;
-    let usage = null, list = [];
-    try { const r = await CP.api('/storage/usage'); usage = (r && r.data) ? r.data : r; } catch (e) {}
-    try { const res = await CP.api('/backup/list'); list = res.data || []; } catch (e) {}
-    let usageHtml = '';
-    if (usage && usage.total != null) {
-      const total = Number(usage.total) || 0;
-      const quota = Number(usage.quota_bytes) || (10 * 1024 * 1024 * 1024);
-      const pct = Math.min(100, Math.max(0.5, total / quota * 100));
-      const mb = b => (Number(b || 0) / 1048576).toFixed(2);
-      usageHtml = `<div class="card" style="padding:14px;margin-bottom:14px">
-        <div class="flex aic" style="gap:12px;margin-bottom:10px">
-          <i class="fas fa-hard-drive" style="color:var(--primary)"></i>
-          <div style="flex:1"><div style="font-size:13px;font-weight:600">存储用量 <span class="text-3" style="font-weight:400">${mb(total)} MB / 10 GB</span></div>
-          <div class="usage-bar" style="margin-top:6px"><div style="width:${pct.toFixed(1)}%"></div></div></div>
-        </div>
-        <div class="text-3" style="font-size:11px;display:flex;gap:14px;flex-wrap:wrap">
-          <span>数据库 ${mb(usage.db_size)} MB</span>
-          <span>备份 ${mb(usage.backups_size)} MB</span>
-          <span>上传 ${mb(usage.uploads_size)} MB</span>
-          <span>共 ${usage.backup_count || 0} 份备份</span>
-        </div>
-      </div>`;
+    const side = uiState.backupSide || 'server';
+    let list = [], unreachable = false;
+    try {
+      const res = await CP.api('/backup/list?side=' + encodeURIComponent(side));
+      list = (res && res.data) || [];
+      if (res && res.unreachable) unreachable = true;
+    } catch (e) {
+      unreachable = true;
     }
-    if (!list.length) { box.innerHTML = usageHtml + '<div class="empty"><i class="fas fa-cloud"></i><p>暂无备份</p></div>'; return; }
-    const cards = list.map(b => `
+    const totalBytes = list.reduce((s, b) => s + (Number(b.size) || 0), 0);
+    const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(2) + ' MB' : (b/1024).toFixed(1) + ' KB';
+    const infoHtml = `
+      <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:var(--fill);border-radius:12px;margin-bottom:14px;font-size:12px;color:var(--text-2)">
+        <span><b style="color:var(--text)">${list.length}</b> 份备份</span>
+        <span>占用 <b style="color:var(--text)">${fmtSize(totalBytes)}</b></span>
+        <span class="spacer"></span>
+        <button class="btn btn-primary btn-sm" onclick="App.doBackupCreate()"><i class="fas fa-cloud-arrow-up"></i> 立即备份</button>
+      </div>`;
+    if (unreachable) {
+      box.innerHTML = infoHtml + '<div class="empty"><i class="fas fa-wifi"></i><p>另一处暂时无法连接</p></div>';
+      return;
+    }
+    if (!list.length) {
+      box.innerHTML = infoHtml + '<div class="empty"><i class="fas fa-cloud"></i><p>暂无备份</p></div>';
+      return;
+    }
+    const cards = list.slice().sort((a,b) => (b.created_at||0) - (a.created_at||0)).map(b => {
+      const key = b.key || b.r2_key || '';
+      return `
       <div class="msg-card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:10px;background:var(--bg-elevated);border-radius:14px;box-shadow:var(--shadow)">
         <div style="width:38px;height:38px;border-radius:10px;background:var(--fill);display:flex;align-items:center;justify-content:center;color:var(--primary)"><i class="fas fa-database"></i></div>
         <div style="flex:1;min-width:0">
@@ -1379,19 +1508,21 @@
             <span class="mono" style="font-size:12px">${CP.esc(b.filename)}</span>
             <span class="badge ${b.type === 'auto' ? 'badge-blue' : 'badge-orange'}" style="font-size:10px">${b.type === 'auto' ? '自动' : '手动'}</span>
           </div>
-          <div class="text-3" style="font-size:11px;margin-top:3px">${CP.fmtTime(b.created_at)} · ${(b.size/1024).toFixed(1)} KB</div>
+          <div class="text-3" style="font-size:11px;margin-top:3px">${CP.fmtTime(b.created_at)} · ${fmtSize(b.size)}</div>
         </div>
         <div style="display:flex;gap:4px">
-          <button class="icon-btn" title="下载" onclick="App.downloadBackup('${CP.esc(b.r2_key)}')"><i class="fas fa-download"></i></button>
-          <button class="icon-btn" title="恢复" onclick="App.restoreFromCloud('${CP.esc(b.r2_key)}')"><i class="fas fa-rotate-left"></i></button>
-          <button class="icon-btn" style="color:var(--red)" title="删除" onclick="App.deleteBackup(${b.id},'${CP.esc(b.r2_key)}')"><i class="fas fa-trash"></i></button>
+          <button class="icon-btn" title="下载" onclick="App.downloadBackup('${CP.esc(key)}')"><i class="fas fa-download"></i></button>
+          <button class="icon-btn" title="恢复" onclick="App.restoreFromCloud('${CP.esc(key)}')"><i class="fas fa-rotate-left"></i></button>
+          <button class="icon-btn" style="color:var(--red)" title="删除" onclick="App.deleteBackup('${CP.esc(key)}')"><i class="fas fa-trash"></i></button>
         </div>
-      </div>`).join('');
-    box.innerHTML = usageHtml + cards;
+      </div>`;
+    }).join('');
+    box.innerHTML = infoHtml + cards;
   }
   async function doBackupCreate() {
+    const side = uiState.backupSide || 'server';
     try {
-      const res = await CP.api('/backup/create', { method: 'POST', body: { type: 'manual' } });
+      const res = await CP.api('/backup/create', { method: 'POST', body: { type: 'manual', side } });
       CP.toast(`备份成功（${((res.size || 0) / 1024).toFixed(1)} KB）`, 'success');
       loadBackupList();
     } catch (e) { CP.failToast(e, '备份失败'); }
@@ -1409,23 +1540,27 @@
     } catch (e) { CP.failToast(e, '下载失败'); }
   }
   async function downloadBackup(key) {
-    try { await authDownload('/api/backup/download?key=' + encodeURIComponent(key), 'backup_' + dateStr() + '.json'); }
+    const side = uiState.backupSide || 'server';
+    try { await authDownload('/api/backup/download?key=' + encodeURIComponent(key) + '&side=' + encodeURIComponent(side), 'backup_' + dateStr() + '.json'); }
     catch (e) { CP.failToast(e, '下载失败'); }
   }
   async function restoreFromCloud(key) {
+    const side = uiState.backupSide || 'server';
     const ok = await CP.confirm('恢复备份', '恢复将覆盖当前所有数据，确定继续？');
     if (!ok) return;
     try {
-      const r = await fetch('/api/backup/download?key=' + encodeURIComponent(key), { headers: { Authorization: 'Bearer ' + CP.getAdminToken() } });
+      const r = await fetch('/api/backup/download?key=' + encodeURIComponent(key) + '&side=' + encodeURIComponent(side), { headers: { Authorization: 'Bearer ' + CP.getAdminToken() } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       await CP.api('/backup/restore', { method: 'POST', body: { backupData: data } });
       CP.toast('恢复成功', 'success'); switchPage('backup');
     } catch (e) { CP.failToast(e, '恢复失败'); }
   }
-  async function deleteBackup(id, key) {
+  async function deleteBackup(key) {
+    const side = uiState.backupSide || 'server';
     const ok = await CP.confirm('删除备份', '确定删除此备份吗？');
     if (!ok) return;
-    try { await CP.api('/backup/delete', { method: 'POST', body: { id, r2_key: key } }); CP.toast('已删除', 'success'); loadBackupList(); }
+    try { await CP.api('/backup/delete', { method: 'POST', body: { key, side } }); CP.toast('已删除', 'success'); loadBackupList(); }
     catch (e) { CP.failToast(e, '删除失败'); }
   }
   function showRestoreModal() {
@@ -1489,6 +1624,7 @@
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_cards === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_cards',this.checked)"><span class="slider"></span></label><span>学生卡片显示头像框</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_tier === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_tier',this.checked)"><span class="slider"></span></label><span>段位排行榜显示头像框</span></div>
       ${isSuper ? `<div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.biweekly_rank_enabled === '1' ? 'checked' : ''} onchange="App.saveCfg('biweekly_rank_enabled',this.checked)"><span class="slider"></span></label><span>前台双周排行显示</span></div>` : ''}
+      <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.modal_blur_enabled !== '0' ? 'checked' : ''} onchange="App.saveCfg('modal_blur_enabled',this.checked)"><span class="slider"></span></label><span>弹窗背景模糊（低配设备可关闭）</span></div>
 
       <h3 class="sec-t mt-20">通知与系统</h3>
       <div class="form-row"><label class="form-label">忘记密码救援邮箱</label>
@@ -1503,7 +1639,7 @@
       <div class="form-row"><label class="form-label">发件地址</label><input id="set-from" class="form-input" value="${CP.esc(appData.config.resend_from || 'onboarding@resend.dev')}"></div>
       <div class="form-row"><label class="form-label">通知接收邮箱</label><input id="set-notify-email" class="form-input" value="${CP.esc(appData.config.notify_email || 'admin@example.com')}" placeholder="admin@example.com"></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_login === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_login',this.checked)"><span class="slider"></span></label><span>登录后台时通知</span></div>
-      <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_backup === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_backup',this.checked)"><span class="slider"></span></label><span>自动备份时通知</span></div>
+      <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_backup === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_backup',this.checked)"><span class="slider"></span></label><span>备份成功时通知（手动/自动）</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_device_code === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_device_code',this.checked)"><span class="slider"></span></label><span>生成激活码时通知</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_master_code === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_master_code',this.checked)"><span class="slider"></span></label><span>万能激活码使用时通知</span></div>
       <button class="btn btn-primary" onclick="App.saveResendFrom()"><i class="fas fa-save"></i> 保存邮件设置</button>
@@ -1587,7 +1723,16 @@
     catch (e) { CP.failToast(e, '保存失败'); }
   }
   async function saveCfg(key, val) {
-    try { await CP.api('/config', { method: 'PUT', body: { [key]: val ? '1' : '0' } }); appData.config[key] = val ? '1' : '0'; CP.toast('已保存', 'success'); }
+    try {
+      await CP.api('/config', { method: 'PUT', body: { [key]: val ? '1' : '0' } });
+      appData.config[key] = val ? '1' : '0';
+      // 弹窗背景模糊开关：立即生效，无需刷新
+      if (key === 'modal_blur_enabled') {
+        CP.bootstrap.modal_blur_enabled = val ? '1' : '0';
+        CP.applyModalBlur();
+      }
+      CP.toast('已保存', 'success');
+    }
     catch (e) { CP.failToast(e, '保存失败'); }
   }
   async function saveResendFrom() {
@@ -2060,7 +2205,7 @@
   async function renderSuperAudit() {
     let logs = [];
     try { const res = await CP.api('/super/audit?limit=300'); logs = res.data || []; } catch (e) {}
-    const names = { change_password: '修改密码', generate_device_code: '生成激活码', delete_device_code: '删除激活码', create_user: '创建账户', update_user: '编辑账户', delete_user: '删除账户', delete_device: '删除设备', super_set_points: '超管直改积分', batch_delete_students: '批量删除学生', batch_delete_groups: '批量删除小组' };
+    const names = { change_password: '修改密码', generate_device_code: '生成激活码', delete_device_code: '删除激活码', create_user: '创建账户', update_user: '编辑账户', delete_user: '删除账户', delete_device: '删除设备', super_set_points: '超管直改积分', batch_delete_students: '批量删除学生', batch_delete_groups: '批量删除小组', master_code: '万能码使用', device_code: '激活码使用', login: '登录', backup: '备份' };
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header"><h2 class="page-title" style="margin:0">操作审计</h2><span class="spacer"></span>
@@ -2072,9 +2217,9 @@
           <td class="text-3 nowrap" style="font-size:12px">${CP.fmtTime(l.created_at, true)}</td>
           <td style="font-weight:600">${CP.esc(l.operator || '-')}</td>
           <td><span class="badge badge-blue">${CP.esc(names[l.action] || l.action)}</span></td>
-          <td style="font-size:12px">${CP.esc(l.target || '-')}</td>
-          <td class="text-2" style="font-size:11px">${CP.esc(l.detail || '-')}</td>
-          <td class="mono text-3" style="font-size:11px">${CP.esc(l.ip || '-')}</td>
+          <td class="ellip-cell" style="font-size:12px" title="${CP.esc(l.target || '')}">${CP.esc(l.target || '-')}</td>
+          <td class="ellip-cell" style="font-size:11px" title="${CP.esc(l.detail || '')}">${CP.esc(l.detail || '-')}</td>
+          <td class="mono text-3 nowrap" style="font-size:11px">${CP.esc(l.ip || '-')}</td>
         </tr>`).join('') + `</tbody></table></div>`}
     </div>`;
   }
@@ -2099,11 +2244,11 @@
         : `<span class="mono" style="font-size:12px">${CP.esc(d.activation_code || '-')}</span>`;
       return `<tr>
         <td style="font-weight:600">${CP.esc(d.device_name || d.name || '-')}</td>
-        <td class="mono" style="font-size:11px" title="${CP.esc(d.device_uuid || '')}">${CP.esc((d.device_uuid || '').slice(0, 8))}…</td>
-        <td class="mono" style="font-size:11px" title="${CP.esc(d.fingerprint || '')}">${CP.esc((d.fingerprint || '').slice(0, 8))}…</td>
+        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.device_uuid || '')}">${CP.esc((d.device_uuid || '').slice(0, 8))}…</td>
+        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.fingerprint || '')}">${CP.esc((d.fingerprint || '').slice(0, 8))}…</td>
         <td>${codeCell}</td>
-        <td class="mono" style="font-size:11px">${CP.esc(d.ip || '-')}</td>
-        <td class="ellip-cell" style="font-size:11px" title="${CP.esc(d.ua || '')}">${CP.esc(d.ua || '-')}</td>
+        <td class="mono text-3 nowrap" style="font-size:11px">${CP.esc(d.ip || '-')}</td>
+        <td class="ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.ua || '')}">${CP.esc(d.ua || '-')}</td>
         <td class="text-3 nowrap" style="font-size:11px">${CP.fmtTime(d.created_at, true)}</td>
         <td class="text-3 nowrap" style="font-size:11px">${CP.fmtTime(d.last_seen)}</td>
         <td><button class="icon-btn" style="color:var(--red)" onclick="App.delDevice(${d.id})"><i class="fas fa-trash"></i></button></td>
@@ -2534,8 +2679,10 @@
     showImportStudents, doImportStudents, showTierStudents,
     toggleGroupBatch, toggleGrpSelect, clearGroupSel, batchDelGroups,
     showAddGroup, doAddGroup, showEditGroup, doUpdateGroup, doDelGroup,
+    uploadGroupAvatar, resetGroupAvatar, pickColor,
     showImportGroups, doImportGroups,
     toggleRuleSel, batchDelRules, showAddRule, doAddRule, showBatchAddRule, doBatchAddRule, doDelRule,
+    dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,
     switchRankTab, loadBiweekly, showBiweeklyHistory,
@@ -2547,6 +2694,7 @@
     loadRecords,
     exportRank, showExportRecords, doExportRecords,
     doBackupCreate, doBackupDownload, downloadBackup, restoreFromCloud, deleteBackup, showRestoreModal, doRestoreFile,
+    switchBackupSide,
     doChangePwd,
     saveSiteTitle, saveCfg, saveResendFrom, saveSysInfo, onNotifySoundChange, uploadNotifySound,
     navClick, feedback, versionToast, avatarMenu, showProfilePop, closeAvatarPop, saveProfile,

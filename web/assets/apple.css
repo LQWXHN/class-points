@@ -215,9 +215,13 @@ select.form-input, select.form-select { appearance: none; -webkit-appearance: no
 .site-switch-pop .ss-item.cur .fa { color: var(--text-3); }
 
 /* ---------- 弹窗 ---------- */
+/* 弹窗背景模糊强度，可由后台「弹窗背景模糊」开关整体关闭（:root.modal-blur-off） */
+:root { --modal-blur: blur(18px) saturate(140%); }
 .modal-back { position: fixed; inset: 0; z-index: 1300; display: none;
-  background: rgba(0,0,0,.25); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  background: rgba(0,0,0,.25); backdrop-filter: var(--modal-blur); -webkit-backdrop-filter: var(--modal-blur);
   align-items: center; justify-content: center; padding: 20px; }
+:root.modal-blur-off { --modal-blur: none; }
+:root.modal-blur-off .modal-back { background: rgba(0,0,0,.45); }
 .modal-back.show { display: flex; }
 .modal { width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto;
   background: var(--surface-solid); border-radius: var(--radius-lg);

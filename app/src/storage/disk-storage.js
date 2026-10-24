@@ -22,7 +22,8 @@ export function createDiskStorage({ dataDir }) {
     put(key, bytes, contentType) {
       const p = resolve(key);
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, bytes);
+      // 兼容 Buffer / Uint8Array / string / ArrayBuffer
+      fs.writeFileSync(p, Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
     },
     get(key) {
       const p = resolve(key);

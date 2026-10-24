@@ -17,12 +17,20 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
 
   function fileBearing(tbl) {
     return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-      || tbl === 'system_announcements';
+      || tbl === 'system_announcements' || tbl === 'groups';
   }
 
   // 从 snapshot 收集需要推/拉的 key（system_announcements 从 Markdown content 提取）
   function keysFromSnap(tbl, snap) {
     if (tbl === 'system_announcements') return extractUploadKeys(snap && snap.content);
+    if (tbl === 'groups') {
+      const av = snap && snap.avatar;
+      if (typeof av === 'string' && av.startsWith('/api/file/')) {
+        const k = keyFromUrl(av);
+        return k ? [k] : [];
+      }
+      return [];
+    }
     const k = keyFromUrl(snap && snap.file_url);
     return k ? [k] : [];
   }
@@ -65,8 +73,8 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
         if (!k) continue;
         const exists = await storage.exists(k);
         if (exists) continue;
-        // system_announcements 图片 URL 在 Markdown 里是相对路径，直接从本端 /api/file/<key> 拉即可
-        const src = ev.tbl === 'system_announcements'
+        // system_announcements / groups 用相对路径，直接从对端 /api/file/<key> 拉
+        const src = (ev.tbl === 'system_announcements' || ev.tbl === 'groups')
           ? `${peerUrl}/api/file/${encodeURIComponent(k)}`
           : (snap.file_url || `${peerUrl}/api/file/${encodeURIComponent(k)}`);
         try {
@@ -74,8 +82,8 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
           if (!resp.ok) continue;
           const buf = Buffer.from(await resp.arrayBuffer());
           await storage.put(k, buf, snap.file_type || 'application/octet-stream');
-          // 仅单列 file_url 表需要重写本地行；system_announcements 用相对路径无需改写 content
-          if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && snap.file_url) {
+          // 仅单列 file_url 表需要重写本地行；system_announcements / groups 用相对路径无需改写
+          if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && snap.file_url) {
             const targetUrl = snap.file_url.replace(peerUrl, myHost);
             await db.run(`UPDATE ${ev.tbl} SET file_url=? WHERE uid=?`, targetUrl, ev.row_uid);
           }

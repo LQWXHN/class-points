@@ -14,15 +14,15 @@ export function groupsRoutes() {
     const me = await verifyUser(c);
     if (!me) return c.json({ ok: false, error: '未授权' }, 401);
     const db = c.get('db');
-    const { name, color, signature } = await c.req.json().catch(() => ({}));
+    const { name, color, signature, avatar } = await c.req.json().catch(() => ({}));
     if (!name) return c.json({ ok: false, error: '组名不能为空' }, 400);
     const t = now();
     const gUid = uid();
-    const snap = { uid: gUid, name, color: color || '#34c759', signature: signature || '', created_at: t, updated_at: t, deleted: 0 };
+    const snap = { uid: gUid, name, color: color || '#34c759', signature: signature || '', avatar: avatar || '', created_at: t, updated_at: t, deleted: 0 };
     const r = await db.tx(async () => {
       const res = await db.run(
-        'INSERT INTO groups (uid, name, color, signature, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-        gUid, name, snap.color, snap.signature, t, t);
+        'INSERT INTO groups (uid, name, color, signature, avatar, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+        gUid, name, snap.color, snap.signature, snap.avatar, t, t);
       await writeSyncEvent(db, { tbl: 'groups', row_uid: gUid, op: 'upsert', snapshot: snap, origin: ORIGIN(c) });
       return res;
     });
@@ -40,10 +40,11 @@ export function groupsRoutes() {
     const name = b.name ?? existing.name;
     const color = b.color ?? existing.color;
     const signature = b.signature ?? existing.signature;
+    const avatar = b.avatar !== undefined ? (b.avatar || '') : (existing.avatar || '');
     const t = now();
-    const snap = { uid: existing.uid, name, color, signature, created_at: existing.created_at, updated_at: t, deleted: 0 };
+    const snap = { uid: existing.uid, name, color, signature, avatar, created_at: existing.created_at, updated_at: t, deleted: 0 };
     await db.tx(async () => {
-      await db.run('UPDATE groups SET name=?, color=?, signature=?, updated_at=? WHERE id=?', name, color, signature, t, id);
+      await db.run('UPDATE groups SET name=?, color=?, signature=?, avatar=?, updated_at=? WHERE id=?', name, color, signature, avatar, t, id);
       await writeSyncEvent(db, { tbl: 'groups', row_uid: existing.uid, op: 'upsert', snapshot: snap, origin: ORIGIN(c) });
     });
     return c.json({ ok: true });

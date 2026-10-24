@@ -1,7 +1,6 @@
-/* 班级积分系统 v4.7 Service Worker */
-const CACHE = 'cp-v54';
+/* 班级积分系统 v4.8 Service Worker：离线外壳缓存（仅缓存，不含推送） */
+const CACHE = 'cp-v55';
 const SHELL = ['/', '/index.html', '/new', '/history', '/assets/apple.css', '/assets/common.js', '/assets/vendor/fontawesome/css/all.min.css'];
-let tokenCache = { deviceToken: '', staffToken: '' };
 
 self.addEventListener('install', e => {
   // 逐个缓存，单个失败不影响整体安装
@@ -34,18 +33,4 @@ self.addEventListener('fetch', e => {
       return res;
     }))
   );
-});
-self.addEventListener('message', e => {
-  if (e.data && e.data.type === 'SET_TOKEN') {
-    tokenCache = { deviceToken: e.data.deviceToken || '', staffToken: e.data.staffToken || '' };
-  }
-});
-self.addEventListener('notificationclick', e => {
-  e.notification.close();
-  e.waitUntil(self.clients.openWindow((e.notification.data && e.notification.data.url) || '/index.html'));
-});
-self.addEventListener('message', e => {
-  if (e.data && e.data.type === 'GET_TOKEN' && e.ports && e.ports[0]) {
-    e.ports[0].postMessage(tokenCache);
-  }
 });

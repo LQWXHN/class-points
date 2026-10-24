@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS groups (
   name       TEXT NOT NULL,
   color      TEXT NOT NULL DEFAULT '#34c759',
   signature  TEXT NOT NULL DEFAULT '',
+  avatar     TEXT NOT NULL DEFAULT '',            -- v4.8: 组头像（Emoji 或 /api/file 上传 URL；空=默认 users 图标）
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted    INTEGER NOT NULL DEFAULT 0

@@ -7,7 +7,7 @@ import { createNodeDb } from './db/node-db.js';
 import { createDiskStorage } from './storage/disk-storage.js';
 import { createApp } from './app.js';
 import { createRunner } from './sync/runner.js';
-import { buildBackup } from './routes/backup.js';
+import { buildBackup, performBackup } from './routes/backup.js';
 import { setSyncOrigin, getConfig, setConfig, now } from './routes/_helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +40,7 @@ await migrateV44(db);
 await migrateV45(db);
 await migrateV46(db);
 await migrateV47(db);
+await migrateV48(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -158,6 +159,44 @@ async function migrateV47(db) {
   if (!vRow) await setConfig(db, 'system_version', 'v4.7（2026-10-18）');
 }
 
+// v4.8 幂等迁移：双周榜口径改为两时点小组平均分差值（清旧缓存让新公式确定性重算）；
+// 新增"弹窗背景模糊"开关（默认开）；groups 表补 avatar 列；point_rules 补 sort_order 列。
+async function migrateV48(db) {
+  // 旧公式写入的双周榜缓存作废（纯缓存，可随时由流水重算）
+  await db.run("DELETE FROM rank_snapshots WHERE kind='biweekly'");
+
+  // 弹窗背景模糊开关：'1' 开（历史默认行为），'0' 关
+  const blurRow = await db.get('SELECT key FROM admin_config WHERE key=?', 'modal_blur_enabled');
+  if (!blurRow) await setConfig(db, 'modal_blur_enabled', '1');
+
+  // groups.avatar 列（v4.8 新增小组头像）
+  const grpCols = await db.all('PRAGMA table_info(groups)');
+  const grpNames = new Set((grpCols || []).map(c => c.name));
+  if (!grpNames.has('avatar')) {
+    await db.run("ALTER TABLE groups ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
+  }
+
+  // point_rules.sort_order 列（v4.8 规则拖拽排序）
+  const prCols = await db.all('PRAGMA table_info(point_rules)');
+  const prNames = new Set((prCols || []).map(c => c.name));
+  if (!prNames.has('sort_order')) {
+    await db.run('ALTER TABLE point_rules ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+    // 按现有 type, id 顺序回填 sort_order=1,2,3...
+    for (const t of ['add', 'sub']) {
+      const rows = await db.all('SELECT uid FROM point_rules WHERE type=? AND deleted=0 ORDER BY id', t);
+      let i = 1;
+      for (const r of rows) {
+        await db.run('UPDATE point_rules SET sort_order=? WHERE uid=?', i++, r.uid);
+      }
+    }
+  }
+
+  // 系统版本号
+  await db.run("UPDATE admin_config SET value='v4.8（2026-10-24）' WHERE key='system_version'");
+  const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
+  if (!vRow) await setConfig(db, 'system_version', 'v4.8（2026-10-24）');
+}
+
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed
 
 const app = createApp({ db, storage, origin: 'node', syncSecret, peerUrl });
@@ -225,12 +264,15 @@ if (peerUrl && syncSecret) {
   await runner.start();
 }
 
-// 04:00 自动备份
+// 每周一 04:00（服务器本地时间）自动备份
 function scheduleAutoBackup() {
   const now = new Date();
   const next = new Date(now);
   next.setHours(4, 0, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
+  // getDay(): 0=周日, 1=周一, ... 6=周六
+  const daysToMonday = (1 - now.getDay() + 7) % 7;
+  next.setDate(now.getDate() + daysToMonday);
+  if (next <= now) next.setDate(next.getDate() + 7);
   setTimeout(() => {
     autoBackupOnce().catch(e => console.error('[autoBackup]', e.message));
     scheduleAutoBackup();
@@ -239,12 +281,8 @@ function scheduleAutoBackup() {
 async function autoBackupOnce() {
   const enabled = await getConfig(db, 'auto_backup_enabled');
   if (enabled !== '1') return;
-  const backup = await buildBackup(db);
-  const filename = `backup_auto_${Date.now()}.json`;
-  const json = JSON.stringify(backup);
-  await storage.put(`backups/${filename}`, json, 'application/json');
-  await db.run('INSERT INTO backup_log (uid, filename, size, type, storage_key, created_at) VALUES (?,?,?,?,?,?)',
-    crypto.randomUUID(), filename, json.length, 'auto', `backups/${filename}`, Date.now());
+  const meta = await performBackup(db, storage, { type: 'auto', source: 'server' });
+  console.log('[autoBackup] ok', meta.filename);
 }
 scheduleAutoBackup();
 

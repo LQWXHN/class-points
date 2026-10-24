@@ -78,6 +78,45 @@ export function feedbackRoutes() {
   return app;
 }
 
+// 把多种来源（Node Buffer / Uint8Array / ArrayBuffer / Web ReadableStream / Response body）统一为 Uint8Array
+async function toUint8(input) {
+  if (!input) return new Uint8Array(0);
+  // 注意：ArrayBuffer.isView 必须在 arrayBuffer() 之前判断——Node Buffer 虽然有 arrayBuffer()，
+  // 但小文件底层可能是池化 Buffer，arrayBuffer() 会返回整个池而不是当前视图，导致附件尾部带垃圾。
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  if (typeof input.getReader === 'function') {
+    // R2 / Response 的 ReadableStream
+    const reader = input.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) { chunks.push(value); total += value.byteLength; }
+    }
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+    return out;
+  }
+  if (typeof input.arrayBuffer === 'function') {
+    // Blob / Response
+    return new Uint8Array(await input.arrayBuffer());
+  }
+  return new Uint8Array(0);
+}
+
+// 分块 base64（避免 String.fromCharCode 一次性爆栈；两端通用，不依赖 Node Buffer）
+function uint8ToBase64(u8) {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
 async function sendFeedbackEmail(c, db, who, content, attachments) {
   const apiKey = await getConfig(db, 'resend_api_key');
   if (!apiKey) return 'no resend key';
@@ -99,13 +138,14 @@ async function sendFeedbackEmail(c, db, who, content, attachments) {
       const key = a.url.replace(/^\/api\/file\//, '');
       const obj = await storage.get(key);
       if (!obj) continue;
-      const buf = Buffer.from(await obj.arrayBuffer ? await obj.arrayBuffer() : obj.body);
+      const bytes = await toUint8(obj.body);
+      if (!bytes.length) continue;
       resendAttachments.push({
         filename: a.name || 'file',
-        content: buf.toString('base64'),
+        content: uint8ToBase64(bytes),
         content_type: a.type || 'application/octet-stream',
       });
-    } catch {}
+    } catch (e) { console.error('[feedback attach]', e.message); }
   }
   const body = { from, to: [to], subject: '【班级积分】用户反馈', html };
   if (resendAttachments.length) body.attachments = resendAttachments;

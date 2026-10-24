@@ -305,14 +305,16 @@
     const r = CP.resolveAvatar(av);
     const bg = opts.bg || 'var(--fill)';
     const frame = opts.frame ? ` ${CP.esc(opts.frame)}` : '';
+    const radius = opts.radius || '50%';
+    const border = opts.border ? `border:2px solid ${opts.border};box-sizing:border-box;` : '';
     const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * .5)}px;background:${bg};`;
     if (r.img) {
-      return `<span class="av-img${frame}" style="display:inline-flex;border-radius:50%;overflow:hidden;flex:none;${style}"
+      return `<span class="av-img${frame}" style="display:inline-flex;border-radius:${radius};overflow:hidden;flex:none;${border}${style}"
         data-protect><img data-protect draggable="false" src="${CP.esc(r.img)}" alt=""
         style="width:100%;height:100%;object-fit:cover;pointer-events:none"></span>`;
     }
     return `<span class="av-emoji${frame}" data-protect
-      style="display:inline-flex;align-items:center;justify-content:center;border-radius:50%;flex:none;${style}">${CP.esc(r.emoji)}</span>`;
+      style="display:inline-flex;align-items:center;justify-content:center;border-radius:${radius};flex:none;${border}${style}">${CP.esc(r.emoji)}</span>`;
   };
 
   /* ---------- 防盗图：右键 / 拖拽 ---------- */
@@ -515,10 +517,15 @@
     };
   };
 
-  /* ---------- Bootstrap（公开引导：sites/ext_links/version/vapid/sound） ---------- */
+  /* ---------- Bootstrap（公开引导：sites/ext_links/version/sound） ---------- */
   CP.bootstrap = {
     sites: [{ name: '主站', url: 'https://points.example.com' }, { name: '备用站', url: 'https://points1.example.com' }],
-    ext_links: {}, system_version: '', vapid_public_key: '', notify_sound: 'ganlu', notify_sound_url: ''
+    ext_links: {}, system_version: '', notify_sound: 'ganlu', notify_sound_url: '',
+    biweekly_rank_enabled: '1', modal_blur_enabled: '1'
+  };
+  // 弹窗背景模糊开关：在 <html> 上切换 class，CSS 见 apple.css（:root.modal-blur-off）
+  CP.applyModalBlur = function () {
+    document.documentElement.classList.toggle('modal-blur-off', CP.bootstrap.modal_blur_enabled === '0');
   };
   CP.loadBootstrap = async function () {
     try {
@@ -527,10 +534,11 @@
       if (Array.isArray(d.sites) && d.sites.length) CP.bootstrap.sites = d.sites;
       if (d.ext_links) CP.bootstrap.ext_links = d.ext_links;
       if (d.system_version) CP.bootstrap.system_version = d.system_version;
-      if (d.vapid_public_key) CP.bootstrap.vapid_public_key = d.vapid_public_key;
       if (d.notify_sound) CP.bootstrap.notify_sound = d.notify_sound;
       if (d.notify_sound_url) CP.bootstrap.notify_sound_url = d.notify_sound_url;
       if (d.biweekly_rank_enabled !== undefined) CP.bootstrap.biweekly_rank_enabled = d.biweekly_rank_enabled;
+      if (d.modal_blur_enabled !== undefined) CP.bootstrap.modal_blur_enabled = d.modal_blur_enabled;
+      CP.applyModalBlur();
     } catch (e) { /* 静默 */ }
     return CP.bootstrap;
   };
@@ -726,60 +734,10 @@
     CP.toast(v, 'info', 3000);
   };
 
-  /* ---------- SW 注册与推送 ---------- */
+  /* ---------- SW 注册（离线外壳缓存） ---------- */
   CP.registerSW = function () {
     if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
-    // SW 消息：GET_TOKEN 由 SW 拉取设备/教师 token
-    navigator.serviceWorker.addEventListener('message', ev => {
-      if (ev.data && ev.data.type === 'GET_TOKEN' && ev.ports && ev.ports[0]) {
-        ev.ports[0].postMessage({ deviceToken: localStorage.getItem('cp_device_token') || '', staffToken: localStorage.getItem('admin_token') || '' });
-      }
-    });
-    const pushTokens = (reg) => {
-      try {
-        const w = reg && reg.active ? reg.active : navigator.serviceWorker.controller;
-        if (w) w.postMessage({
-          type: 'SET_TOKEN',
-          deviceToken: localStorage.getItem('cp_device_token') || '',
-          staffToken: localStorage.getItem('admin_token') || ''
-        });
-      } catch (e) {}
-    };
-    navigator.serviceWorker.register('/sw.js').then(reg => {
-      CP.swReg = reg;
-      pushTokens(reg);
-      reg.addEventListener('updatefound', () => {
-        const w = reg.installing;
-        if (w) w.onstatechange = () => { if (w.state === 'activated') pushTokens(reg); };
-      });
-    }).catch(() => {});
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      navigator.serviceWorker.ready.then(pushTokens).catch(() => {});
-    });
-  };
-  CP.subscribePush = async function () {
-    try {
-      if (!('Notification' in window) || Notification.permission === 'denied') return;
-      if (Notification.permission !== 'granted') await Notification.requestPermission();
-      if (!CP.bootstrap.vapid_public_key) return;
-      const reg = CP.swReg || await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: CP.urlBase64ToUint8(CP.bootstrap.vapid_public_key)
-      });
-      await CP.api('/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
-      // 缓存 token 给 SW
-      if (reg.active) reg.active.postMessage({
-        type: 'SET_TOKEN',
-        deviceToken: localStorage.getItem('cp_device_token') || '',
-        staffToken: localStorage.getItem('admin_token') || ''
-      });
-    } catch (e) { /* 静默 */ }
-  };
-  CP.urlBase64ToUint8 = function (b64) {
-    const pad = b64.replace(/-/g, '+').replace(/_/g, '/');
-    const raw = atob(pad);
-    return Uint8Array.from(raw, c => c.charCodeAt(0));
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
   };
 
   /* ---------- 防截图（威慑/遮挡层，浏览器无法真正阻止 OS 级截图） ----------

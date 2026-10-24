@@ -16,52 +16,84 @@ function periodBounds(index) {
     period_end: ANCHOR + (index + 1) * PERIOD_MS,
   };
 }
+const round2 = (x) => Math.round(x * 100) / 100;
 
-// 确定性重算某周期 [start, end) 的人均变化榜
+// ============================================================
+// 双周榜规则（v4.8 起，最简单、可对账的口径）：
+//   某组本期进步分 = 该组在本期结束时的小组平均分 − 该组在本期开始时的小组平均分
+// 其中"小组平均分"与小组榜完全一致：组内现有成员（未删除、已分组）积分之和 ÷ 人数。
+// 两时点的每个学生积分由 point_records 流水确定性重放得出：
+//   type='set' → 余额绝对值（迁移期初余额 / 全部重置为 0）
+//   type='add' → 加分；type='sub' → 减分；apply=1 才计入（含 hidden=1 超管直改）
+// 组归属按学生当前所在小组；历史上换组的流水不影响（系统不记录组归属历史）。
+// 数学上：小组平均分只差 = 窗口内组内净加减总分之和 ÷ 人数，
+// 但直接用两时点平均分会自动正确处理 set/重置等边界，不会漏算。
+// ============================================================
 async function computeBiweekly(db, start, end) {
-  // 窗口内 apply=1 的 add/sub 流水（排除 set），按学生当前组汇总 signed points
+  // 现有学生（未删除且已分组），按当前组归属
+  const stus = await db.all(
+    "SELECT uid, group_uid, points FROM students WHERE deleted=0 AND group_uid != ''");
+
+  // 截至 end（不含）之前的全部生效流水，一次取出后按学生重放
   const recs = await db.all(
-    `SELECT pr.student_uid, pr.type, pr.points
-     FROM point_records pr
-     WHERE pr.apply=1 AND pr.type IN ('add','sub')
-       AND pr.created_at >= ? AND pr.created_at < ?`,
-    start, end);
+    `SELECT student_uid, type, points, created_at
+     FROM point_records
+     WHERE apply=1 AND created_at < ?
+     ORDER BY student_uid, created_at`,
+    end);
 
-  // 学生当前组归属
-  const stus = await db.all("SELECT uid, group_uid FROM students WHERE deleted=0 AND group_uid != ''");
-  const groupOf = {};
-  for (const s of stus) groupOf[s.uid] = s.group_uid;
-
-  const deltaByGroup = {};
+  const recsByStu = {};
   for (const r of recs) {
-    const g = groupOf[r.student_uid];
-    if (!g) continue; // 未分组/已删除学生不计
-    if (!deltaByGroup[g]) deltaByGroup[g] = 0;
-    deltaByGroup[g] += (r.type === 'sub' ? -1 : 1) * Number(r.points || 0);
+    if (!recsByStu[r.student_uid]) recsByStu[r.student_uid] = [];
+    recsByStu[r.student_uid].push(r);
   }
 
-  // 各组当前人数
-  const memberByGroup = {};
+  // 每个学生在本期开始、结束两个时点的累计积分
+  const startBal = {};
+  const endBal = {};
   for (const s of stus) {
-    memberByGroup[s.group_uid] = (memberByGroup[s.group_uid] || 0) + 1;
+    const arr = recsByStu[s.uid] || [];
+    let bal = 0;
+    let startCaptured = false;
+    for (const r of arr) {
+      if (!startCaptured && r.created_at >= start) { startBal[s.uid] = bal; startCaptured = true; }
+      if (r.type === 'set') bal = Number(r.points) || 0;
+      else if (r.type === 'sub') bal -= Number(r.points) || 0;
+      else bal += Number(r.points) || 0;
+    }
+    if (!startCaptured) startBal[s.uid] = bal;
+    endBal[s.uid] = bal;
   }
 
+  // 组信息
   const groups = await db.all('SELECT uid, name, color FROM groups WHERE deleted=0');
   const gInfo = {};
   for (const g of groups) gInfo[g.uid] = g;
 
+  // 按当前组聚合
+  const agg = {};
+  for (const s of stus) {
+    const g = s.group_uid;
+    if (!agg[g]) agg[g] = { n: 0, startSum: 0, endSum: 0 };
+    agg[g].n++;
+    agg[g].startSum += startBal[s.uid] || 0;
+    agg[g].endSum += endBal[s.uid] || 0;
+  }
+
   const rows = [];
-  for (const [gUid, memberCount] of Object.entries(memberByGroup)) {
-    if (!memberCount) continue;
+  for (const [gUid, a] of Object.entries(agg)) {
+    if (!a.n) continue;
     const info = gInfo[gUid] || { name: '', color: '#34c759' };
-    const totalDelta = Math.round(deltaByGroup[gUid] || 0);
+    const totalDelta = a.endSum - a.startSum;
     rows.push({
       group_uid: gUid,
       group_name: info.name,
       color: info.color || '#34c759',
-      member_count: memberCount,
+      member_count: a.n,
+      avg_start: round2(a.startSum / a.n),
+      avg_end: round2(a.endSum / a.n),
       total_delta: totalDelta,
-      delta_avg: Math.round((totalDelta / memberCount) * 100) / 100,
+      delta_avg: round2(totalDelta / a.n), // = 期末平均分 − 期初平均分
     });
   }
   rows.sort((a, b) => b.delta_avg - a.delta_avg || b.total_delta - a.total_delta);
@@ -98,7 +130,8 @@ export function rankingsRoutes() {
     }
 
     const bounds = periodBounds(index);
-    const endMs = isCurrent ? nowMs : bounds.period_end;
+    // 当期重算到当前时刻（多取 1ms 以覆盖同毫秒写入）；历史期按周期边界 [start,end) 取数
+    const endMs = isCurrent ? nowMs + 1 : bounds.period_end;
 
     let rows;
     if (isCurrent) {
@@ -133,7 +166,7 @@ export function rankingsRoutes() {
     const resp = {
       period_index: index,
       period_start: bounds.period_start,
-      period_end: endMs,
+      period_end: isCurrent ? nowMs : bounds.period_end,
       is_current: isCurrent,
       rows,
     };

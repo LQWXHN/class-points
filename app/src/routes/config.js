@@ -82,7 +82,7 @@ export function configRoutes() {
     const db = c.get('db');
     const updates = await c.req.json().catch(() => ({}));
     // v4.5：backup 端（worker）不允许写外观类配置（站点/显示/双周开关），必须在主站修改
-    const APPEARANCE_KEYS = new Set(['sites', 'ext_links', 'biweekly_rank_enabled', 'system_version', 'site_title']);
+    const APPEARANCE_KEYS = new Set(['sites', 'ext_links', 'biweekly_rank_enabled', 'modal_blur_enabled', 'system_version', 'site_title']);
     const isBackup = c.get('origin') === 'worker';
     for (const [k, v] of Object.entries(updates)) {
       if (isBackup && APPEARANCE_KEYS.has(k)) {
@@ -103,6 +103,12 @@ export function configRoutes() {
         if (me.role !== 'super') return c.json({ ok: false, error: '双周排行开关仅超管可改' }, 403);
         const s = String(v);
         if (s !== '0' && s !== '1') return c.json({ ok: false, error: 'biweekly_rank_enabled 必须为 0 或 1' }, 400);
+        await setConfig(db, k, s);
+        continue;
+      }
+      if (k === 'modal_blur_enabled') {
+        const s = String(v);
+        if (s !== '0' && s !== '1') return c.json({ ok: false, error: 'modal_blur_enabled 必须为 0 或 1' }, 400);
         await setConfig(db, k, s);
         continue;
       }

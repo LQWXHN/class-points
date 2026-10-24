@@ -7,7 +7,7 @@ export function snapshotRoutes() {
     const db = c.get('db');
     const students = await db.all('SELECT * FROM students WHERE deleted=0 ORDER BY id');
     const groups = await db.all('SELECT * FROM groups WHERE deleted=0 ORDER BY id');
-    const rules = await db.all('SELECT * FROM point_rules WHERE deleted=0 ORDER BY type, id');
+    const rules = await db.all('SELECT * FROM point_rules WHERE deleted=0 ORDER BY type, sort_order ASC, id');
     let announcements = await db.all(
       'SELECT * FROM announcements WHERE deleted=0 ORDER BY created_at DESC LIMIT 50');
     const cfgRows = await db.all(

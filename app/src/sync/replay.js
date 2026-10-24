@@ -97,11 +97,11 @@ async function applyUpsert(db, ev, table, opts = {}) {
 
   if (table === 'groups') {
     if (local) {
-      await db.run(`UPDATE groups SET name=?, color=?, signature=?, updated_at=?, deleted=0 WHERE uid=?`,
-        snap.name, snap.color || '#34c759', snap.signature || '', snap.updated_at || Date.now(), keyVal);
+      await db.run(`UPDATE groups SET name=?, color=?, signature=?, avatar=?, updated_at=?, deleted=0 WHERE uid=?`,
+        snap.name, snap.color || '#34c759', snap.signature || '', snap.avatar || '', snap.updated_at || Date.now(), keyVal);
     } else {
-      await db.run(`INSERT INTO groups (uid, name, color, signature, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
-        keyVal, snap.name, snap.color || '#34c759', snap.signature || '',
+      await db.run(`INSERT INTO groups (uid, name, color, signature, avatar, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+        keyVal, snap.name, snap.color || '#34c759', snap.signature || '', snap.avatar || '',
         snap.created_at || Date.now(), snap.updated_at || Date.now());
     }
     return;
@@ -109,12 +109,13 @@ async function applyUpsert(db, ev, table, opts = {}) {
 
   if (table === 'point_rules') {
     if (local) {
-      await db.run(`UPDATE point_rules SET type=?, reason=?, points=?, is_custom=?, updated_at=?, deleted=0 WHERE uid=?`,
-        snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1, snap.updated_at || Date.now(), keyVal);
+      await db.run(`UPDATE point_rules SET type=?, reason=?, points=?, is_custom=?, is_builtin=?, sort_order=?, updated_at=?, deleted=0 WHERE uid=?`,
+        snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1, snap.is_builtin ?? 0,
+        snap.sort_order ?? 0, snap.updated_at || Date.now(), keyVal);
     } else {
-      await db.run(`INSERT INTO point_rules (uid, type, reason, points, is_custom, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
-        keyVal, snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1,
-        snap.created_at || Date.now(), snap.updated_at || Date.now());
+      await db.run(`INSERT INTO point_rules (uid, type, reason, points, is_custom, is_builtin, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+        keyVal, snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1, snap.is_builtin ?? 0,
+        snap.sort_order ?? 0, snap.created_at || Date.now(), snap.updated_at || Date.now());
     }
     return;
   }

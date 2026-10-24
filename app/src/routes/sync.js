@@ -1,14 +1,27 @@
 import { Hono } from 'hono';
 import { getKv, setKv, verifyUser } from './_helpers.js';
 import { replayEvent, keyFromUrl, extractUploadKeys } from '../sync/replay.js';
+import { performBackup, listBackupFiles } from './backup.js';
 
-// 事件携带的附件引用若本地缺失，加入 need_files 向对端索要
+  // 事件携带的附件引用若本地缺失，加入 need_files 向对端索要
 function fileBearingTable(tbl) {
   return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-    || tbl === 'system_announcements';
+    || tbl === 'system_announcements' || tbl === 'groups';
 }
 async function collectNeedFile(storage, needFiles, tbl, rowUid, snap) {
   if (!snap) return;
+  // 单列 file_url 的表
+  if (tbl === 'groups') {
+    // groups.avatar 可能是 emoji / dataURL / /api/file/uploads/xxx；只处理相对 /api/file 路径
+    const av = snap.avatar || '';
+    if (av.startsWith('/api/file/')) {
+      const k = keyFromUrl(av);
+      if (k && !(await storage.exists(k))) {
+        needFiles.push({ row_uid: rowUid, url: av, name: k.split('/').pop() || '', type: 'image/*' });
+      }
+    }
+    return;
+  }
   // 单列 file_url 的表
   if (tbl !== 'system_announcements' && snap.file_url) {
     const k = keyFromUrl(snap.file_url);
@@ -129,6 +142,51 @@ export function syncRoutes() {
       last_pull_at: await getKv(db, 'sync_last_pull_at'),
       last_error: await getKv(db, 'sync_last_error'),
       pending_out: pendingRow ? pendingRow.c : 0,
+    });
+  });
+
+  // ============ 备份对端内部接口（X-Sync-Key 鉴权） ============
+  function requireSyncKey(c) {
+    const secret = c.get('syncSecret');
+    const key = c.req.header('X-Sync-Key') || '';
+    if (!secret || key !== secret) return false;
+    return true;
+  }
+
+  app.post('/sync/backup/list', async (c) => {
+    if (!requireSyncKey(c)) return c.json({ ok: false, error: 'unauthorized' }, 401);
+    const rows = await listBackupFiles(c.get('storage'));
+    return c.json({ ok: true, data: rows });
+  });
+
+  app.post('/sync/backup/create', async (c) => {
+    if (!requireSyncKey(c)) return c.json({ ok: false, error: 'unauthorized' }, 401);
+    const body = await c.req.json().catch(() => ({}));
+    const type = body.type === 'auto' ? 'auto' : 'manual';
+    const source = c.get('origin') === 'worker' ? 'cloud' : 'server';
+    const meta = await performBackup(c.get('db'), c.get('storage'), { type, source });
+    return c.json({ ok: true, ...meta });
+  });
+
+  app.post('/sync/backup/delete', async (c) => {
+    if (!requireSyncKey(c)) return c.json({ ok: false, error: 'unauthorized' }, 401);
+    const { key } = await c.req.json().catch(() => ({}));
+    if (!key) return c.json({ ok: false, error: 'missing key' }, 400);
+    try { await c.get('storage').del(key); } catch {}
+    await c.get('db').run('DELETE FROM backup_log WHERE storage_key=?', key);
+    return c.json({ ok: true });
+  });
+
+  app.get('/sync/backup/file', async (c) => {
+    if (!requireSyncKey(c)) return c.json({ ok: false, error: 'unauthorized' }, 401);
+    const key = c.req.query('key');
+    if (!key) return c.json({ ok: false, error: 'missing key' }, 400);
+    const got = await c.get('storage').get(key);
+    if (!got) return c.json({ ok: false, error: 'not found' }, 404);
+    const basename = key.split('/').pop() || 'backup.json';
+    return c.body(got.body, 200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': `attachment; filename="${basename}"`,
     });
   });
 

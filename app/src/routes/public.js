@@ -18,6 +18,7 @@ export function publicRoutes() {
     const sound = await getConfig(db, 'notify_sound') || 'ganlu';
     const soundUrl = await getConfig(db, 'notify_sound_url') || '';
     const biweeklyEnabled = await getConfig(db, 'biweekly_rank_enabled') || '1';
+    const modalBlurEnabled = await getConfig(db, 'modal_blur_enabled') || '1';
     let sitesArr = [], extObj = {};
     try { sitesArr = JSON.parse(sites); } catch {}
     try { extObj = JSON.parse(extLinks); } catch {}
@@ -29,6 +30,7 @@ export function publicRoutes() {
       notify_sound: sound,
       notify_sound_url: soundUrl,
       biweekly_rank_enabled: biweeklyEnabled,
+      modal_blur_enabled: modalBlurEnabled,
     });
   });
 

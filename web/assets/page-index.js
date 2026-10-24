@@ -193,7 +193,11 @@ function cardsHTML() {
         <div class="card grp-card fade-in" style="--c:${g.color}">
           <div class="grp-head">
             <div class="grp-title">
-              <div class="grp-icon" style="background:${g.color}1a;color:${g.color}"><i class="fas fa-users"></i></div>
+              ${g.avatar
+                ? (CP.resolveAvatar(g.avatar).img
+                  ? `<div class="grp-icon" style="width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none;border:2px solid ${g.color};display:flex;align-items:center;justify-content:center"><img src="${CP.esc(CP.resolveAvatar(g.avatar).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
+                  : `<div class="grp-icon" style="width:44px;height:44px;border-radius:50%;flex:none;border:2px solid ${g.color};display:flex;align-items:center;justify-content:center;font-size:22px;background:${g.color}1a">${CP.esc(g.avatar)}</div>`)
+                : `<div class="grp-icon" style="background:${g.color}1a;color:${g.color}"><i class="fas fa-users"></i></div>`}
               <div style="min-width:0">
                 <div class="grp-name">${CP.esc(g.name)}<span class="grp-num" style="background:${g.color}1a;color:${g.color}">第${idx + 1}组</span></div>
                 <div class="grp-count">${members.length} 名成员</div>
@@ -537,13 +541,19 @@ function renderBiweekly(c) {
     </div>` + x.rows.map((r, i) => {
     const pos = i + 1, posCls = pos <= 3 ? 'p' + pos : '';
     const up = r.delta_avg >= 0;
+    const gAv = (appData.groups.find(g => g.id === r.group_id || g.name === r.group_name) || {}).avatar;
+    const avHTML = gAv
+      ? (CP.resolveAvatar(gAv).img
+        ? `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;overflow:hidden;flex:none;border:2px solid ${r.color}"><img src="${CP.esc(CP.resolveAvatar(gAv).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
+        : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;flex:none;border:2px solid ${r.color};display:flex;align-items:center;justify-content:center;font-size:16px;background:${r.color}1a">${CP.esc(gAv)}</div>`)
+      : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;background:${r.color}1a;color:${r.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>`;
     return `
       <div class="rank-item">
         <div class="rk-pos ${posCls}">${pos}</div>
-        <div class="rk-av" style="width:32px;height:32px;border-radius:9px;background:${r.color}1a;color:${r.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>
+        ${avHTML}
         <div class="rk-info">
           <div class="rk-name">${CP.esc(r.group_name)}</div>
-          <div class="rk-sub">${r.member_count} 名成员</div>
+          <div class="rk-sub">${r.member_count} 名成员 · 平均分 ${Number(r.avg_start).toFixed(2)} → ${Number(r.avg_end).toFixed(2)}</div>
         </div>
         <div class="rk-pts" style="color:${up ? 'var(--green)' : 'var(--red)'}">${up ? '+' : ''}${Number(r.delta_avg).toFixed(2)}</div>
       </div>`;
@@ -586,10 +596,15 @@ function renderRankings() {
     if (!gs.length) { c.innerHTML = emptyRank(); return; }
     c.innerHTML = gs.map((g, i) => {
       const pos = i + 1, posCls = pos <= 3 ? 'p' + pos : '';
+      const avHTML = g.avatar
+        ? (CP.resolveAvatar(g.avatar).img
+          ? `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;overflow:hidden;flex:none;border:2px solid ${g.color}"><img src="${CP.esc(CP.resolveAvatar(g.avatar).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
+          : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;flex:none;border:2px solid ${g.color};display:flex;align-items:center;justify-content:center;font-size:16px;background:${g.color}1a">${CP.esc(g.avatar)}</div>`)
+        : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;background:${g.color}1a;color:${g.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>`;
       return `
         <div class="rank-item">
           <div class="rk-pos ${posCls}">${pos}</div>
-          <div class="rk-av" style="width:32px;height:32px;border-radius:9px;background:${g.color}1a;color:${g.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>
+          ${avHTML}
           <div class="rk-info">
             <div class="rk-name">${CP.esc(g.name)}<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:${g.color}1a;color:${g.color};margin-left:5px">第${g.origIdx + 1}组</span></div>
             <div class="rk-sub">${g.count} 名成员</div>
@@ -762,8 +777,13 @@ function bindEvents() {
   CP.loadBootstrap().then(() => {
     const box = $('ext-links'); if (box) {
       const L = CP.bootstrap.ext_links || {};
-      const items = [['github', L.github, 'fa-brands fa-github'], ['home', L.home, 'fas fa-house'], ['blog', L.blog, 'fas fa-blog']];
-      box.innerHTML = items.filter(i => i[1]).map(i => `<a href="${CP.esc(i[1])}" target="_blank" class="icon-btn" title="${i[0]}"><i class="${i[2]}"></i></a>`).join('');
+      const items = [
+        ['后台管理', '/admin', 'fas fa-screwdriver-wrench'],
+        ['github', L.github, 'fa-brands fa-github'],
+        ['home', L.home, 'fas fa-house'],
+        ['blog', L.blog, 'fas fa-blog'],
+      ];
+      box.innerHTML = items.filter(i => i[1]).map(i => `<a href="${CP.esc(i[1])}"${i[1].startsWith('/') ? '' : ' target="_blank"'} class="icon-btn" title="${i[0]}"><i class="${i[2]}"></i></a>`).join('');
     }
     // biweekly toggle
     const biw = $('rk-biw');

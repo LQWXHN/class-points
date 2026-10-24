@@ -17,13 +17,21 @@ async function toBuffer(x) {
 // 带附件引用的表（附件自愈扫描覆盖）
 function fileBearingTable(tbl) {
   return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-    || tbl === 'system_announcements';
+    || tbl === 'system_announcements' || tbl === 'groups';
 }
 
 // 从事件 snapshot 中收集所有需要推/拉的存储 key（system_announcements 从 Markdown content 提取）
 function keysFromSnap(tbl, snap) {
   if (tbl === 'system_announcements') {
     return extractUploadKeys(snap && snap.content);
+  }
+  if (tbl === 'groups') {
+    const av = snap && snap.avatar;
+    if (typeof av === 'string' && av.startsWith('/api/file/')) {
+      const k = keyFromUrl(av);
+      return k ? [k] : [];
+    }
+    return [];
   }
   const k = keyFromUrl(snap && snap.file_url);
   return k ? [k] : [];
@@ -124,8 +132,8 @@ async function pullMissingFiles(db, storage, peerUrl, secret, events) {
         const ct = r.headers.get('content-type') || snap.file_type || 'application/octet-stream';
         await storage.put(k, buf, ct);
         // 重写本端行 file_url 为本地相对路径（本站 /api/file 会解析到 R2）
-        // system_announcements 的图片以 Markdown 相对路径嵌入，两端都直接可访问，无需改写 content
-        if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && snap.file_url) {
+        // system_announcements / groups 的图片以相对路径嵌入，两端都直接可访问，无需改写
+        if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && snap.file_url) {
           await db.run(`UPDATE ${ev.tbl} SET file_url=? WHERE uid=?`, `/api/file/${encodeURIComponent(k)}`, ev.row_uid);
         }
       } catch (e) { /* ignore */ }
@@ -162,8 +170,6 @@ async function reconcilePullMissing(db, storage, peerUrl, secret) {
        SELECT 'announcements' AS tbl, uid, file_url, file_name, file_type, created_at FROM announcements WHERE deleted=0 AND file_url IS NOT NULL AND file_url != ''
        UNION ALL
        SELECT 'front_messages' AS tbl, uid, file_url, file_name, file_type, created_at FROM front_messages WHERE deleted=0 AND file_url IS NOT NULL AND file_url != ''
-       UNION ALL
-       SELECT 'chat_messages' AS tbl, uid, file_url, file_name, file_type, created_at FROM chat_messages WHERE deleted=0 AND file_url IS NOT NULL AND file_url != ''
      ) ORDER BY created_at DESC LIMIT 200`);
   for (const a of rows) {
     const k = keyFromUrl(a.file_url);

@@ -75,21 +75,15 @@ export default {
         await db.run("INSERT OR REPLACE INTO kv_meta (key, value) VALUES ('sync_last_error', ?)", e.message);
       }
 
-      // ---- 2. 04:00 UTC 自动备份 ----
+      // ---- 2. 每周一 04:00（北京时间）自动备份 ----
       try {
-        const now = new Date();
-        if (now.getUTCHours() === 4 && now.getUTCMinutes() < 1) {
+        const bj = new Date(Date.now() + 8 * 3600 * 1000);
+        if (bj.getUTCDay() === 1 && bj.getUTCHours() === 4 && bj.getUTCMinutes() < 1) {
           const enabled = await getConfig(db, 'auto_backup_enabled');
           if (enabled === '1') {
-            const { buildBackup } = await import('./routes/backup.js');
-            const backup = await buildBackup(db);
-            const filename = `backup_auto_${Date.now()}.json`;
-            const json = JSON.stringify(backup);
-            await storage.put(`backups/${filename}`, json, 'application/json');
-            await db.run(
-              'INSERT INTO backup_log (uid, filename, size, type, storage_key, created_at) VALUES (?,?,?,?,?,?)',
-              crypto.randomUUID(), filename, json.length, 'auto', `backups/${filename}`, Date.now());
-            console.log('[backup] auto ok', filename);
+            const { performBackup } = await import('./routes/backup.js');
+            const meta = await performBackup(db, storage, { type: 'auto', source: 'cloud' });
+            console.log('[backup] auto ok', meta.filename);
           }
         }
       } catch (e) {
