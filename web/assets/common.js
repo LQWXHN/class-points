@@ -740,41 +740,6 @@
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   };
 
-  /* ---------- 防截图（威慑/遮挡层，浏览器无法真正阻止 OS 级截图） ----------
-     真正防截屏需桌面客户端 setContentProtection；此处仅做失焦遮罩/快捷键拦截/禁右键拖拽。 */
-  CP.antiScreenshot = function () {
-    let mask = null;
-    function showMask() {
-      if (mask) return;
-      mask = document.createElement('div');
-      mask.style.cssText = 'position:fixed;inset:0;background:#f5f5f7;z-index:99999;display:flex;align-items:center;justify-content:center;font-size:14px;color:#999;backdrop-filter:blur(20px)';
-      mask.textContent = '页面受保护';
-      document.body.appendChild(mask);
-    }
-    function hideMask() { if (mask) { mask.remove(); mask = null; } }
-    document.addEventListener('visibilitychange', () => document.hidden ? showMask() : hideMask());
-    window.addEventListener('blur', showMask);
-    window.addEventListener('focus', hideMask);
-    window.addEventListener('beforeprint', showMask);
-    window.addEventListener('afterprint', hideMask);
-    document.addEventListener('keydown', e => {
-      if (e.ctrlKey && (e.key === 'p' || e.key === 'P' || (e.shiftKey && (e.key === 's' || e.key === 'S')))) {
-        e.preventDefault(); CP.toast('页面受保护', 'warn');
-      }
-      if (e.key === 'PrintScreen') {
-        navigator.clipboard && navigator.clipboard.writeText('').catch(() => {});
-      }
-    });
-    document.addEventListener('contextmenu', e => {
-      if (!e.target.closest('input,textarea,select')) e.preventDefault();
-    });
-    document.addEventListener('dragstart', e => {
-      if (e.target.tagName === 'IMG') e.preventDefault();
-    });
-    document.body.style.userSelect = 'none';
-    document.body.style.webkitUserSelect = 'none';
-  };
-
   /* ---------- 初始化 ---------- */
   CP.bindImageGuard();
   CP.registerSW();

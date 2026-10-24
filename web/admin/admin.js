@@ -316,7 +316,7 @@
     if (ext.blog) items.push({ url: ext.blog, icon: 'fas fa-blog', label: '博客' });
     if (!items.length) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="side-ext-links-row">` + items.map(it =>
-      `<a href="${CP.esc(it.url)}"${it.url.startsWith('/') ? '' : ' target="_blank"'} title="${CP.esc(it.label)}"><i class="${it.icon}"></i></a>`).join('') + `</div>`;
+      `<a href="${CP.esc(it.url)}" target="_blank" rel="noopener" title="${CP.esc(it.label)}"><i class="${it.icon}"></i></a>`).join('') + `</div>`;
   }
   function closeSidebar() {
     const sb = $('sidebar'); if (sb) sb.classList.remove('open');
@@ -687,12 +687,12 @@
     const file = f && f.files && f.files[0];
     if (!file) return;
     try {
-      const token = localStorage.staffToken || localStorage.token || '';
       const fd = new FormData(); fd.append('file', file);
-      const r = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'Authorization': 'Bearer ' + token } });
-      const j = await r.json();
-      if (j.ok) { $(inputId).value = j.url; CP.toast('头像已上传', 'success'); }
-      else CP.failToast(j, '上传失败');
+      const up = await CP.api('/upload', { method: 'POST', body: fd });
+      const u = (up && (up.data || up)) || {};
+      const url = u.url || u.file_url || '';
+      if (url) { $(inputId).value = url; CP.toast('头像已上传', 'success'); }
+      else CP.failToast(new Error(up.error || '未返回文件地址'), '上传失败');
     } catch (e) { CP.failToast(e, '上传失败'); }
   }
   async function doAddGroup() {
@@ -768,11 +768,12 @@
         return `
         <div class="rule-row" draggable="true" data-uid="${r.uid}" data-type="${type}" data-idx="${idx}"
           ondragstart="App.dragRuleStart(event,'${type}')" ondragover="App.dragRuleOver(event,'${type}')" ondrop="App.dropRule(event,'${type}')" ondragend="App.dragRuleEnd(event)"
-          ${builtin ? 'style="opacity:.55"' : ''}>
-          <i class="fas fa-grip-vertical" style="color:var(--text-3);margin-right:6px;cursor:grab;font-size:12px"></i>
+          ${builtin ? 'style="opacity:.6"' : ''}>
+          <i class="fas fa-grip-vertical" style="color:var(--text-3);margin-right:2px;cursor:grab;font-size:12px"></i>
           <input type="checkbox" style="width:16px;height:16px;flex:none" ${builtin || !selSet ? 'disabled' : (selSet.has(r.id) ? 'checked' : '')} onchange="App.toggleRuleSel('${type}',${r.id},this.checked)">
           <div class="rule-reason">${CP.esc(r.reason)} ${builtin ? '<span class="badge" style="font-size:10px;background:var(--fill);color:var(--text-3)">内置</span>' : ''}</div>
           <div class="rule-pts ${type}">${pts}</div>
+          <button class="icon-btn" style="color:var(--blue);${builtin ? 'pointer-events:none;opacity:.4' : ''}" ${builtin ? 'title="内置规则不可修改"' : 'title="编辑规则"'} onclick="App.showEditRule(${r.id},'${type}')"><i class="fas fa-pen"></i></button>
           <button class="icon-btn" style="color:var(--red);${builtin ? 'pointer-events:none;opacity:.4' : ''}" ${builtin ? 'title="内置规则不可修改"' : ''} onclick="App.doDelRule(${r.id})"><i class="fas fa-trash"></i></button>
         </div>`;
       }).join('') + `</div>`;
@@ -882,6 +883,27 @@
     if (points <= 0) return CP.toast('积分值必须为正整数', 'warn');
     try { await CP.api('/rules', { method: 'POST', body: { type, reason, points } }); CP.toast('添加成功', 'success'); CP.closeModal(); switchPage('rules'); }
     catch (e) { CP.failToast(e, '添加失败'); }
+  }
+  function showEditRule(id, type) {
+    const r = appData.rules.find(x => x.id === id);
+    if (!r) return;
+    if (r.is_builtin) return CP.toast('内置规则不可修改', 'warn');
+    CP.modal(`<h3>编辑${type === 'add' ? '加分' : '减分'}规则</h3>
+      <div class="form-row"><label class="form-label">原因</label><input id="er-reason" class="form-input" value="${CP.esc(r.reason)}"></div>
+      <div class="form-row"><label class="form-label">积分值（正整数）</label><input id="er-points" type="number" class="form-input" value="${Math.abs(r.points)}" min="1"></div>
+      <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doEditRule(${id},'${type}')">保存</button></div>`);
+  }
+  async function doEditRule(id, type) {
+    const r = appData.rules.find(x => x.id === id);
+    if (!r) return;
+    const reason = $('er-reason').value.trim();
+    let points = Math.abs(parseInt($('er-points').value) || 0);
+    if (!reason) return CP.toast('请输入原因', 'warn');
+    if (points <= 0) return CP.toast('积分值必须为正整数', 'warn');
+    try {
+      await CP.api(`/rules/${id}`, { method: 'PUT', body: { reason, points, type } });
+      CP.toast('已保存', 'success'); CP.closeModal(); switchPage('rules');
+    } catch (e) { CP.failToast(e, '保存失败'); }
   }
   function showBatchAddRule(type) {
     CP.modal(`<h3>批量新增${type === 'add' ? '加分' : '减分'}规则</h3><p class="text-2" style="font-size:13px;margin:0 0 12px">每行一条：原因,积分值</p>
@@ -2235,23 +2257,23 @@
       <div class="page-header"><h2 class="page-title" style="margin:0">设备管理</h2><span class="spacer"></span>
         <button class="btn btn-soft" onclick="App.refreshPage()"><i class="fas fa-rotate"></i> 刷新</button></div>
       ${!list.length ? '<div class="empty"><i class="fas fa-mobile-screen"></i><p>暂无已激活设备</p></div>' : `
-      <div class="table-wrap tbl-scroll"><table class="cp-table">
+      <div class="table-wrap tbl-scroll"><table class="cp-table" style="min-width:880px">
         <thead><tr><th>设备名</th><th>UUID</th><th>指纹</th><th>激活码</th><th>IP</th><th>UA</th><th>激活时间</th><th>最后在线</th><th></th></tr></thead>
         <tbody>` + list.map(d => {
       const master = !!d.is_master;
       const codeCell = master
-        ? '<span class="badge badge-orange">调试码</span>'
-        : `<span class="mono" style="font-size:12px">${CP.esc(d.activation_code || '-')}</span>`;
+        ? '<span class="badge badge-orange" style="white-space:nowrap">调试码</span>'
+        : `<span class="mono" style="font-size:12px;white-space:nowrap">${CP.esc(d.activation_code || '-')}</span>`;
       return `<tr>
-        <td style="font-weight:600">${CP.esc(d.device_name || d.name || '-')}</td>
-        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.device_uuid || '')}">${CP.esc((d.device_uuid || '').slice(0, 8))}…</td>
-        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.fingerprint || '')}">${CP.esc((d.fingerprint || '').slice(0, 8))}…</td>
-        <td>${codeCell}</td>
+        <td class="ellip-cell text-2 nowrap" style="font-weight:600;max-width:140px" title="${CP.esc(d.device_name || d.name || '')}">${CP.esc(d.device_name || d.name || '-')}</td>
+        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px;max-width:110px" title="${CP.esc(d.device_uuid || '')}">${CP.esc((d.device_uuid || '').slice(0, 8))}…</td>
+        <td class="mono ellip-cell text-3 nowrap" style="font-size:11px;max-width:110px" title="${CP.esc(d.fingerprint || '')}">${CP.esc((d.fingerprint || '').slice(0, 8))}…</td>
+        <td class="nowrap">${codeCell}</td>
         <td class="mono text-3 nowrap" style="font-size:11px">${CP.esc(d.ip || '-')}</td>
-        <td class="ellip-cell text-3 nowrap" style="font-size:11px" title="${CP.esc(d.ua || '')}">${CP.esc(d.ua || '-')}</td>
+        <td class="ellip-cell text-3 nowrap" style="font-size:11px;max-width:220px" title="${CP.esc(d.ua || '')}">${CP.esc(d.ua || '-')}</td>
         <td class="text-3 nowrap" style="font-size:11px">${CP.fmtTime(d.created_at, true)}</td>
         <td class="text-3 nowrap" style="font-size:11px">${CP.fmtTime(d.last_seen)}</td>
-        <td><button class="icon-btn" style="color:var(--red)" onclick="App.delDevice(${d.id})"><i class="fas fa-trash"></i></button></td>
+        <td class="nowrap"><button class="icon-btn" style="color:var(--red)" onclick="App.delDevice(${d.id})"><i class="fas fa-trash"></i></button></td>
       </tr>`;
     }).join('') + `</tbody></table></div>`}
     </div>`;
@@ -2681,7 +2703,7 @@
     showAddGroup, doAddGroup, showEditGroup, doUpdateGroup, doDelGroup,
     uploadGroupAvatar, resetGroupAvatar, pickColor,
     showImportGroups, doImportGroups,
-    toggleRuleSel, batchDelRules, showAddRule, doAddRule, showBatchAddRule, doBatchAddRule, doDelRule,
+    toggleRuleSel, batchDelRules, showAddRule, doAddRule, showEditRule, doEditRule, showBatchAddRule, doBatchAddRule, doDelRule,
     dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,

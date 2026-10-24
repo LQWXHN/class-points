@@ -41,6 +41,7 @@ await migrateV45(db);
 await migrateV46(db);
 await migrateV47(db);
 await migrateV48(db);
+await migrateV49(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -195,6 +196,13 @@ async function migrateV48(db) {
   await db.run("UPDATE admin_config SET value='v4.8（2026-10-24）' WHERE key='system_version'");
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v4.8（2026-10-24）');
+}
+
+// v4.9 幂等迁移：无表结构变更，仅更新系统版本号
+async function migrateV49(db) {
+  await db.run("UPDATE admin_config SET value='v4.9（2026-10-25）' WHERE key='system_version'");
+  const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
+  if (!vRow) await setConfig(db, 'system_version', 'v4.9（2026-10-25）');
 }
 
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed

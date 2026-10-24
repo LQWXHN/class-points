@@ -135,11 +135,14 @@ async function sendFeedbackEmail(c, db, who, content, attachments) {
   for (const a of attachments) {
     try {
       if (!a.url) continue;
-      const key = a.url.replace(/^\/api\/file\//, '');
+      // storage.url() 生成的是 /api/file/<encodeURIComponent(key)>，这里必须解码，
+      // 否则磁盘/R2 里 uploads%2Fxxx 这种 key 永远查不到，邮件就只有文件名
+      let key = a.url.replace(/^\/api\/file\//, '');
+      try { key = decodeURIComponent(key); } catch { /* 保留原值 */ }
       const obj = await storage.get(key);
-      if (!obj) continue;
+      if (!obj) { console.error('[feedback attach] file not found:', key); continue; }
       const bytes = await toUint8(obj.body);
-      if (!bytes.length) continue;
+      if (!bytes.length) { console.error('[feedback attach] empty file:', key); continue; }
       resendAttachments.push({
         filename: a.name || 'file',
         content: uint8ToBase64(bytes),

@@ -394,4 +394,4 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 .sys-ann-modal-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
-.ext-links{display:flex;gap:6px;margin-left:auto;align-items:center}.ext-links a{color:var(--text-2);font-size:14px;padding:4px}
+.ext-links{display:flex;gap:6px;margin-left:auto;align-items:center;flex:none}.ext-links a{color:var(--text-2);font-size:14px;padding:3px 4px;white-space:nowrap}

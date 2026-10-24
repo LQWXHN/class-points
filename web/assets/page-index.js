@@ -347,19 +347,20 @@ function quickChange(sid, type) {
   const rules = appData.rules.filter(r => r.type === type);
   if (!rules.length) return CP.toast('暂无该类型规则', 'error');
   const opText = type === 'add' ? '加分' : '减分';
+  const sign = type === 'add' ? '+' : '-';
   const box = CP.modal(`
     <h3>${opText} — ${CP.esc(s.name)}</h3>
     <p style="color:var(--text-2);margin:0 0 14px">当前积分 <b>${s.points}</b></p>
     <div class="form-row"><label class="form-label">原因</label>
       <select id="qc-reason" class="form-select">
-        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${r.points > 0 ? '+' : ''}${r.points})</option>`).join('')}
+        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${sign}${Math.abs(r.points)})</option>`).join('')}
       </select></div>
     <div class="form-row"><label class="form-label">积分值</label>
       <input id="qc-points" type="number" class="form-input" value="${Math.abs(rules[0] && rules[0].points) || 10}" min="1" style="text-align:center;font-weight:700;font-size:18px">
       <div class="quick-pts">
-        <button type="button" data-addval="5">+5</button>
-        <button type="button" data-addval="10">+10</button>
-        <button type="button" data-addval="20">+20</button>
+        <button type="button" data-addval="5">${sign}5</button>
+        <button type="button" data-addval="10">${sign}10</button>
+        <button type="button" data-addval="20">${sign}20</button>
       </div></div>
     <div class="form-row" id="qc-custom-row" style="display:none"><label class="form-label">自定义原因（1-30字）</label>
       <input id="qc-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
@@ -411,20 +412,21 @@ function showBatchPoints(type) {
   const rules = appData.rules.filter(r => r.type === type);
   if (!rules.length) return CP.toast('暂无该类型规则', 'error');
   const opText = type === 'add' ? '批量加分' : '批量减分';
+  const sign = type === 'add' ? '+' : '-';
   const targetText = ui.selected.size > 0 ? `已选 ${ui.selected.size} 名学生` : '将对所有学生操作';
   const box = CP.modal(`
     <h3>${opText}</h3>
     <p style="color:var(--text-2);margin:0 0 14px">${CP.esc(targetText)}</p>
     <div class="form-row"><label class="form-label">原因</label>
       <select id="bp-reason" class="form-select">
-        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${r.points > 0 ? '+' : ''}${r.points})</option>`).join('')}
+        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${sign}${Math.abs(r.points)})</option>`).join('')}
       </select></div>
     <div class="form-row"><label class="form-label">积分值</label>
       <input id="bp-points" type="number" class="form-input" value="${Math.abs(rules[0] && rules[0].points) || 10}" min="1" style="text-align:center;font-weight:700;font-size:18px">
       <div class="quick-pts">
-        <button type="button" data-addval="5">+5</button>
-        <button type="button" data-addval="10">+10</button>
-        <button type="button" data-addval="20">+20</button>
+        <button type="button" data-addval="5">${sign}5</button>
+        <button type="button" data-addval="10">${sign}10</button>
+        <button type="button" data-addval="20">${sign}20</button>
       </div></div>
     <div class="form-row" id="bp-custom-row" style="display:none"><label class="form-label">自定义原因（1-30字）</label>
       <input id="bp-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
@@ -783,7 +785,7 @@ function bindEvents() {
         ['home', L.home, 'fas fa-house'],
         ['blog', L.blog, 'fas fa-blog'],
       ];
-      box.innerHTML = items.filter(i => i[1]).map(i => `<a href="${CP.esc(i[1])}"${i[1].startsWith('/') ? '' : ' target="_blank"'} class="icon-btn" title="${i[0]}"><i class="${i[2]}"></i></a>`).join('');
+      box.innerHTML = items.filter(i => i[1]).map(i => `<a href="${CP.esc(i[1])}" target="_blank" rel="noopener" class="icon-btn" title="${i[0]}"><i class="${i[2]}"></i></a>`).join('');
     }
     // biweekly toggle
     const biw = $('rk-biw');
@@ -818,7 +820,6 @@ window.addEventListener('resize', () => { if (window.innerWidth > 1024) closeRan
 /* ---------- 启动 ---------- */
 (async function init() {
   CP.applyTitle();
-  CP.antiScreenshot && CP.antiScreenshot();
   const ok = await CP.requireDevice();
   if (!ok) return; // 已跳转 /start
   bindEvents();

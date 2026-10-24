@@ -176,7 +176,10 @@
 
 /* v4.2 系统公告弹窗 */
 .bell-btn { margin-left: 8px; }
-.conn-status { display: flex; align-items: center; gap: 6px; }
+.conn-status { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.conn-status #conn-dot { flex: none; }
+.conn-status #conn-text { flex: none; white-space: nowrap; }
+.conn-status .ext-links { flex: none; }
 .sys-date-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; scrollbar-width: none; }
 .sys-date-strip::-webkit-scrollbar { display: none; }
 .sys-date-card { flex: none; min-width: 64px; padding: 8px 10px; border-radius: 11px; background: var(--surface-2); border: 1px solid transparent; cursor: pointer; text-align: center; transition: all .15s; }

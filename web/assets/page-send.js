@@ -40,7 +40,6 @@ async function doSend() {
 
 (async function init() {
   CP.applyTitle('发消息');
-  CP.antiScreenshot && CP.antiScreenshot();
   const ok = await CP.requireDevice(); // 无设备 token 自动跳激活
   if (!ok) return;
   $('btn-send').onclick = doSend;

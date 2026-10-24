@@ -339,7 +339,6 @@ async function refresh() {
 
 (async function init() {
   CP.applyTitle('班级动态');
-  CP.antiScreenshot && CP.antiScreenshot();
   bindSearch();
   const ok = await CP.requireDevice();
   if (!ok) return;

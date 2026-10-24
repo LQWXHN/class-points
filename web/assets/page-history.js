@@ -232,7 +232,6 @@ function bind() {
 
 (async function init() {
   CP.applyTitle('历史记录');
-  CP.antiScreenshot && CP.antiScreenshot();
   const ok = await CP.requireDevice();
   if (!ok) return;
   bind();
