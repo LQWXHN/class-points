@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { uid, now, getConfig, verifyUser, writeSyncEvent } from './_helpers.js';
 
-// 双周榜周期锚点：2026-10-12 00:00 Asia/Shanghai，每 14 天一个周期
-// 第 1 期（index 0）= 2026-10-12 00:00 ~ 2026-10-26 00:00（即 10-12~10-25 共 14 天）；10-12 之前的数据不计入
-const ANCHOR = Date.UTC(2026, 9, 12) - 8 * 3600 * 1000; // = 2026-10-12 00:00+08:00 的 epoch ms
+// 双周榜周期锚点：2026-10-26 00:00 Asia/Shanghai，每 14 天一个周期（v5.1）
+// 第 1 期（index 0）= 2026-10-26 00:00 ~ 2026-11-09 00:00（即 10-26~11-08 共 14 天）
+const ANCHOR = Date.UTC(2026, 9, 26) - 8 * 3600 * 1000;
 const PERIOD_MS = 14 * 24 * 3600 * 1000;
 
 function periodIndexAt(t) {
@@ -29,12 +29,12 @@ const round2 = (x) => Math.round(x * 100) / 100;
 // 数学上：小组平均分只差 = 窗口内组内净加减总分之和 ÷ 人数，
 // 但直接用两时点平均分会自动正确处理 set/重置等边界，不会漏算。
 // ============================================================
-async function computeBiweekly(db, start, end) {
+async function computeBiweekly(db, start, end, periodStartKey, isCurrent) {
   // 现有学生（未删除且已分组），按当前组归属
   const stus = await db.all(
     "SELECT uid, group_uid, points FROM students WHERE deleted=0 AND group_uid != ''");
 
-  // 截至 end（不含）之前的全部生效流水，一次取出后按学生重放
+  // 截至 end（不含）之前的全部生效流水，一次取出后按学生重放（快照缺失时的兜底口径）
   const recs = await db.all(
     `SELECT student_uid, type, points, created_at
      FROM point_records
@@ -48,7 +48,7 @@ async function computeBiweekly(db, start, end) {
     recsByStu[r.student_uid].push(r);
   }
 
-  // 每个学生在本期开始、结束两个时点的累计积分
+  // 每个学生在本期开始、结束两个时点的累计积分（流水重放兜底）
   const startBal = {};
   const endBal = {};
   for (const s of stus) {
@@ -70,11 +70,23 @@ async function computeBiweekly(db, start, end) {
   const gInfo = {};
   for (const g of groups) gInfo[g.uid] = g;
 
-  // 按当前组聚合
+  // v5.1 快照口径（用户指定）：期首/期末各记一次小组总分与人数，
+  // 进步分 = (期末总分 − 期首总分) ÷ 期末人数；缺快照时回退流水重放
+  // period_start 用 CAST 兼容历史手插数据的文本形式（"1792944000000" / "1792944000000.0"）
+  const snapRows = await db.all(
+    'SELECT kind, group_id, total, member_count FROM biweekly_snapshots WHERE CAST(period_start AS REAL)=?',
+    Number(periodStartKey));
+  const startSnap = {}, endSnap = {};
+  for (const r of snapRows) {
+    const target = r.kind === 'end' ? endSnap : startSnap;
+    target[r.group_id] = r;
+  }
+
+  // 按当前组聚合（期末口径）
   const agg = {};
   for (const s of stus) {
     const g = s.group_uid;
-    if (!agg[g]) agg[g] = { n: 0, startSum: 0, endSum: 0 };
+    if (!agg[g]) agg[g] = { n: 0, startSum: 0, endSum: 0, startN: 0 };
     agg[g].n++;
     agg[g].startSum += startBal[s.uid] || 0;
     agg[g].endSum += endBal[s.uid] || 0;
@@ -83,18 +95,47 @@ async function computeBiweekly(db, start, end) {
   const rows = [];
   for (const [gUid, a] of Object.entries(agg)) {
     if (!a.n) continue;
+    // 期末：当期取实时总分与人数，历史期取期末快照
+    let endSum = a.endSum, endN = a.n;
+    if (!isCurrent && endSnap[gUid]) {
+      endSum = Number(endSnap[gUid].total);
+      endN = endSnap[gUid].member_count;
+    }
+    // 期首：有快照用快照，否则用流水重放
+    let startSum = a.startSum, startN = a.n;
+    if (startSnap[gUid]) {
+      startSum = Number(startSnap[gUid].total);
+      startN = startSnap[gUid].member_count;
+    }
     const info = gInfo[gUid] || { name: '', color: '#34c759' };
-    const totalDelta = a.endSum - a.startSum;
+    const totalDelta = endSum - startSum;
     rows.push({
       group_uid: gUid,
       group_name: info.name,
       color: info.color || '#34c759',
-      member_count: a.n,
-      avg_start: round2(a.startSum / a.n),
-      avg_end: round2(a.endSum / a.n),
-      total_delta: totalDelta,
-      delta_avg: round2(totalDelta / a.n), // = 期末平均分 − 期初平均分
+      member_count: endN,
+      avg_start: round2(startSum / (startN || endN)),
+      avg_end: round2(endSum / endN),
+      total_delta: round2(totalDelta),
+      delta_avg: round2(totalDelta / endN), // = (期末总分 − 期首总分) ÷ 期末人数
     });
+  }
+  // 历史期若有期末快照里多出的组（当期已分组、现在已删/改组），补齐
+  if (!isCurrent) {
+    for (const [gUid, e] of Object.entries(endSnap)) {
+      if (rows.some(r => r.group_uid === gUid)) continue;
+      const s = startSnap[gUid] || { total: 0, member_count: e.member_count };
+      const info = gInfo[gUid] || { name: '（已解散小组）', color: '#8e8e93' };
+      const totalDelta = Number(e.total) - Number(s.total);
+      rows.push({
+        group_uid: gUid, group_name: info.name, color: info.color || '#8e8e93',
+        member_count: e.member_count,
+        avg_start: round2(Number(s.total) / (s.member_count || e.member_count)),
+        avg_end: round2(Number(e.total) / e.member_count),
+        total_delta: round2(totalDelta),
+        delta_avg: round2(totalDelta / e.member_count),
+      });
+    }
   }
   rows.sort((a, b) => b.delta_avg - a.delta_avg || b.total_delta - a.total_delta);
   rows.forEach((r, i) => { r.rank = i + 1; });
@@ -117,7 +158,7 @@ export function rankingsRoutes() {
       }
     }
     const nowMs = now();
-    const curIdx = periodIndexAt(nowMs);
+    const curIdx = Math.max(0, periodIndexAt(nowMs)); // 第一期开始前（锚点前一天）也展示第一期
     const periodParam = c.req.query('period') || 'current';
 
     let index, isCurrent;
@@ -125,7 +166,7 @@ export function rankingsRoutes() {
       index = curIdx; isCurrent = true;
     } else {
       const pi = parseInt(periodParam);
-      if (Number.isNaN(pi)) return c.json({ ok: false, error: 'period 参数无效' }, 400);
+      if (Number.isNaN(pi) || pi < 0) return c.json({ ok: false, error: 'period 参数无效' }, 400);
       index = pi; isCurrent = (index === curIdx);
     }
 
@@ -135,18 +176,18 @@ export function rankingsRoutes() {
 
     let rows;
     if (isCurrent) {
-      rows = await computeBiweekly(db, bounds.period_start, endMs);
+      rows = await computeBiweekly(db, bounds.period_start, endMs, bounds.period_start, true);
     } else {
-      // 已结束周期：优先读缓存，没有则确定性重算并 UPSERT 缓存（发同步事件）
+      // 已结束周期：优先读缓存，没有则用快照确定性重算并 UPSERT 缓存（发同步事件）
       let cached = await db.get(
         "SELECT payload FROM rank_snapshots WHERE kind='biweekly' AND period_index=?", index);
       if (cached) {
         try {
           const parsed = JSON.parse(cached.payload);
           rows = Array.isArray(parsed) ? parsed : (parsed.rows || []);
-        } catch { rows = await computeBiweekly(db, bounds.period_start, bounds.period_end); }
+        } catch { rows = await computeBiweekly(db, bounds.period_start, bounds.period_end, bounds.period_start, false); }
       } else {
-        rows = await computeBiweekly(db, bounds.period_start, bounds.period_end);
+        rows = await computeBiweekly(db, bounds.period_start, bounds.period_end, bounds.period_start, false);
         const snap = {
           uid: uid(), kind: 'biweekly', period_index: index,
           period_start: bounds.period_start, period_end: bounds.period_end,
@@ -166,8 +207,9 @@ export function rankingsRoutes() {
     const resp = {
       period_index: index,
       period_start: bounds.period_start,
-      period_end: isCurrent ? nowMs : bounds.period_end,
+      period_end: bounds.period_end,
       is_current: isCurrent,
+      not_started: isCurrent && nowMs < bounds.period_start,
       rows,
     };
     if (isCurrent) {

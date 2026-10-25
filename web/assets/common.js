@@ -190,6 +190,8 @@
     const method = (opts.method || 'GET').toUpperCase();
     const url = (opts.absolute || CP.API) + path;
     const headers = authHeaders(opts.headers);
+    if (opts.noDeviceToken) delete headers['X-Device-Token'];
+    if (opts.noStaffToken) delete headers['Authorization'];
     let body = null;
     if (opts.body instanceof FormData) {
       body = opts.body; // 浏览器自动设置 multipart boundary
@@ -735,13 +737,17 @@
   };
 
   /* ---------- 群聊未读角标（v5.0） ---------- */
+  // v5.1：后台路径一律 staff 身份，前台路径一律设备身份，避免同浏览器双 token 串号
+  const isStaffPage = () => /^\/(admin|chat-staff|chat\/teacher|chat\/admin)/.test(location.pathname);
   CP.pollChatUnread = function (onUpdate) {
-    // 30s 一次，页面隐藏时跳过
+    // v5.1: 10s 轮询，页面隐藏时跳过
     let lastCount = -1;
     async function tick() {
       if (document.hidden) return;
       try {
-        const r = await CP.api('/chat/unread-count', { handle401: false });
+        const opts = { handle401: false };
+        if (isStaffPage()) opts.noDeviceToken = true; else opts.noStaffToken = true;
+        const r = await CP.api('/chat/unread-count', opts);
         if (r && typeof r.count === 'number' && r.count !== lastCount) {
           lastCount = r.count;
           try { onUpdate(r.count); } catch {}
@@ -749,7 +755,76 @@
       } catch {}
     }
     tick();
-    setInterval(tick, 30000);
+    setInterval(tick, 10000);
+  };
+
+  // v5.1: 全局轻量 EventSource（非聊天页才连）
+  CP.startGlobalChatSSE = function (onMessage, onRead, onNotice) {
+    if (/^\/chat/.test(location.pathname)) return; // 聊天页自己有 SSE
+    let es = null, retryTimer = null, closed = false;
+    function staffPageNow() { return isStaffPage(); }
+    function connect() {
+      if (closed || document.hidden) return;
+      const t = CP.getAdminToken();
+      const dt = CP.getDeviceToken();
+      const staffPage = staffPageNow();
+      const token = staffPage ? t : dt;
+      if (!token) { retryTimer = setTimeout(connect, 15000); return; }
+      try {
+        const qs = staffPage ? '?t=' + encodeURIComponent(token) : '?dt=' + encodeURIComponent(token);
+        es = new EventSource('/api/chat/stream' + qs);
+        es.addEventListener('message', e => { try { onMessage && onMessage(JSON.parse(e.data)); } catch {} });
+        es.addEventListener('read', e => { try { onRead && onRead(JSON.parse(e.data)); } catch {} });
+        es.addEventListener('notice', e => {
+          try {
+            const n = JSON.parse(e.data);
+            if (onNotice) onNotice(n);
+            else if (n && n.content) CP.toast('📢 群公告：' + n.content, 'info', 4000);
+          } catch {}
+        });
+        es.onerror = () => {
+          try { es.close(); } catch {}
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(connect, 15000); // 弱网/抖动后自动重连
+        };
+      } catch {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(connect, 15000);
+      }
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        closed = true;
+        clearTimeout(retryTimer);
+        try { es && es.close(); } catch {}
+      } else {
+        closed = false;
+        clearTimeout(retryTimer);
+        connect();
+      }
+    });
+    connect();
+    // 公告轮询兜底：SSE 完全不可用时，公告变更最迟 60s 内也能收到提醒
+    let lastNoticeUid = null;
+    async function pollNotice() {
+      if (document.hidden) return;
+      try {
+        const opts = staffPageNow() ? { noDeviceToken: true, handle401: false }
+                                    : { noStaffToken: true, handle401: false };
+        const nc = await CP.api('/chat/notice', opts);
+        const d = (nc && nc.data) ? nc.data : nc;
+        const n = d && d.notice ? d.notice : d;
+        if (n && n.uid) {
+          if (lastNoticeUid && lastNoticeUid !== n.uid) {
+            if (onNotice) onNotice(n);
+            else if (n.content) CP.toast('📢 群公告：' + n.content, 'info', 4000);
+          }
+          lastNoticeUid = n.uid;
+        }
+      } catch {}
+    }
+    setTimeout(pollNotice, 3000);
+    setInterval(pollNotice, 60000);
   };
 
   /* ---------- SW 注册（离线外壳缓存） ---------- */

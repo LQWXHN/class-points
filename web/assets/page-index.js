@@ -513,6 +513,7 @@ async function loadBiweekly(period) {
   if (ui.rank === 'biweekly') renderRankings();
 }
 function fmtRange(ms) { return CP.fmtDate(ms).slice(5); }
+function fmtRangeEnd(ms) { return CP.fmtDate(ms - 1).slice(5); }
 function renderBiweekly(c) {
   if (ui.biw.historyMode) {
     // 历史周期列表
@@ -521,7 +522,7 @@ function renderBiweekly(c) {
       (h.length ? h.map(p => `
         <div class="rank-item biw-item" data-biw-period="${p.period_index}">
           <div class="rk-info" style="flex:1">
-            <div class="rk-name">${fmtRange(p.period_start)} ~ ${fmtRange(p.period_end)}</div>
+            <div class="rk-name">${fmtRange(p.period_start)} ~ ${fmtRangeEnd(p.period_end)}</div>
             <div class="rk-sub">第 ${p.period_index + 1} 期</div>
           </div>
           <i class="fas fa-chevron-right text-3"></i>
@@ -535,10 +536,11 @@ function renderBiweekly(c) {
   }
   const x = ui.biw.data;
   if (!x || !Array.isArray(x.rows) || !x.rows.length) { c.innerHTML = emptyRank(); return; }
-  const rangeTxt = `${fmtRange(x.period_start)} ~ ${fmtRange(x.period_end)}`;
+  const rangeTxt = `${fmtRange(x.period_start)} ~ ${fmtRangeEnd(x.period_end)}`;
+  const suffix = x.not_started ? ' · 明日开始' : (x.is_current ? ' · 进行中' : '');
   c.innerHTML = `
     <div class="biw-head">
-      <div class="biw-range">${rangeTxt}${x.is_current ? ' · 进行中' : ''}</div>
+      <div class="biw-range">${rangeTxt}${suffix}</div>
       <button class="btn btn-sm btn-soft" id="biw-hist"><i class="fas fa-clock-rotate-left"></i> 历史排行</button>
     </div>` + x.rows.map((r, i) => {
     const pos = i + 1, posCls = pos <= 3 ? 'p' + pos : '';

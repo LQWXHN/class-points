@@ -17,23 +17,8 @@ function sseBroadcast(event, data, excludeMemberKey = '') {
 }
 
 async function authChat(c) {
-  // 1) Bearer / header 优先
-  const me = await verifyUser(c);
-  if (me) {
-    // 补 avatar / wxpusher_uid
-    const db = c.get('db');
-    const row = await db.get('SELECT avatar, wxpusher_uid FROM admin_users WHERE username=? AND deleted=0', me.username);
-    return {
-      member_key: me.username,
-      name: me.display_name || me.username,
-      avatar: (row && row.avatar) || '',
-      wxpusher_uid: (row && row.wxpusher_uid) || '',
-      role: me.role,
-      is_staff: true,
-    };
-  }
-  // 2) front：header 或 query ?dt= 设备 token（EventSource 不支持自定义头）
   const db = c.get('db');
+  // 1) 设备 token 优先（v5.1：前台身份隔离，同浏览器登录 admin 后 /chat 仍以 front 身份发言）
   let dev = await verifyDevice(c);
   if (!dev) {
     const dt = c.req.query('dt');
@@ -47,7 +32,20 @@ async function authChat(c) {
     const wxpusher_uid = (await getConfig(db, 'wxpusher_uid_front')) || '';
     return { member_key: 'front', name, avatar, wxpusher_uid, role: 'front', is_staff: false, device: dev };
   }
-  // 3) staff：query ?t=<token>（SSE 用）
+  // 2) staff Bearer
+  const me = await verifyUser(c);
+  if (me) {
+    const row = await db.get('SELECT avatar, wxpusher_uid FROM admin_users WHERE username=? AND deleted=0', me.username);
+    return {
+      member_key: me.username,
+      name: me.display_name || me.username,
+      avatar: (row && row.avatar) || '',
+      wxpusher_uid: (row && row.wxpusher_uid) || '',
+      role: me.role,
+      is_staff: true,
+    };
+  }
+  // 3) staff query ?t=<token>（SSE 用）
   const qt = c.req.query('t');
   if (qt) {
     await db.run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
@@ -122,10 +120,10 @@ async function shapeMsg(db, m, favoriteSet) {
       };
     }
   }
-  // read_count: 其他成员 last_read_at >= m.created_at 的数量
+  // read_count: last_read_id >= m.id 的成员数（不含发送者自己）
   const row = await db.get(
-    `SELECT COUNT(*) AS c FROM chat_reads WHERE member_key != ? AND last_read_at >= ?`,
-    m.sender_key, m.created_at
+    `SELECT COUNT(*) AS c FROM chat_reads WHERE member_key != ? AND last_read_id >= ?`,
+    m.sender_key, m.id
   );
   let attachments = [];
   try { attachments = JSON.parse(m.attachments || '[]'); } catch {}
@@ -293,10 +291,9 @@ export function chatRoutes() {
     });
     const shaped = await shapeMsg(db, row, null);
     sseBroadcast('message', shaped, me.member_key);
-    // 推送（WxPusher）：异步，不阻塞响应；origin 来自请求（不写死域名）
-    const origin = new URL(c.req.url, 'http://x').origin === 'http://x'
-      ? (new URL(c.req.url)).origin || ''
-      : (c.req.header('Origin') || new URL(c.req.url, c.req.header('Referer') || 'http://localhost').origin);
+    // 推送（WxPusher）：取第一个在线公网站点作为跳转 url
+    const { pickPublicOnline } = await import('../sites-health.js');
+    const origin = pickPublicOnline() || (c.req.header('Origin') || (c.req.header('Referer') ? new URL(c.req.header('Referer')).origin : '')) || '';
     pushChatMessage(db, shaped, me.member_key, { origin }).catch(e => console.error('[wxpush]', e.message));
     return c.json({ ok: true, message: shaped });
   });
@@ -319,7 +316,7 @@ export function chatRoutes() {
       tbl: 'chat_reads', row_uid: me.member_key, op: 'upsert',
       snapshot: { member_key: me.member_key, last_read_id: afterId, last_read_at: t, updated_at: t },
     });
-    sseBroadcast('read', { member_key: me.member_key, last_read_id: afterId, last_read_at: t });
+    sseBroadcast('read', { member_key: me.member_key, name: me.name, last_read_id: afterId, last_read_at: t });
     return c.json({ ok: true });
   });
 
@@ -413,7 +410,20 @@ export function chatRoutes() {
       snapshot: { uid: nUid, content, author: me.name, created_at: t, updated_at: t, deleted: 0 },
     });
     sseBroadcast('notice', { uid: nUid, content, author: me.name, created_at: t });
+    // WxPusher 推送（公告变更）
+    const { pickPublicOnline } = await import('../sites-health.js');
+    const origin = pickPublicOnline() || (c.req.header('Origin') || '');
+    const { pushNotice } = await import('../push/wxpusher.js');
+    pushNotice(db, me.name, content, me.member_key, { origin }).catch(e => console.error('[wxpush notice]', e.message));
     return c.json({ ok: true, notice: { uid: nUid, content, author: me.name, created_at: t } });
+  });
+
+  // v5.1：站点健康（super）
+  app.get('/admin/sites-health', async (c) => {
+    const me = await verifyUser(c);
+    if (!me || me.role !== 'super') return c.json({ ok: false, error: '需要超管权限' }, 403);
+    const { getSiteHealth } = await import('../sites-health.js');
+    return c.json({ ok: true, health: getSiteHealth() });
   });
 
   // 未读数：last_read_id < 最大消息 id 的数量
@@ -429,7 +439,24 @@ export function chatRoutes() {
       'SELECT COUNT(*) AS c FROM chat_messages WHERE id > ? AND deleted=0 AND sender_key != ?',
       lrid, me.member_key
     );
-    return c.json({ ok: true, count: (cnt && cnt.c) || 0, last_id: mid });
+    // v5.1: 返回最新一条消息预览（角标用）
+    const lastMsg = await db.get(
+      "SELECT sender_name, msg_type, content, attachments, recalled FROM chat_messages WHERE deleted=0 ORDER BY id DESC LIMIT 1"
+    );
+    let preview = '';
+    if (lastMsg) {
+      if (lastMsg.recalled) preview = (lastMsg.sender_name || '有人') + '撤回了一条消息';
+      else if (lastMsg.msg_type === 'image') preview = '[图片]';
+      else if (lastMsg.msg_type === 'file') {
+        try { const a = JSON.parse(lastMsg.attachments || '[]')[0]; preview = '[文件] ' + (a && a.name || ''); }
+        catch { preview = '[文件]'; }
+      } else {
+        let t = lastMsg.content || '';
+        t = t.replace(/\[face:(?:wx|qq):[^\]]+\]/g, '[表情]');
+        preview = t.length > 20 ? t.slice(0, 20) + '…' : t;
+      }
+    }
+    return c.json({ ok: true, count: (cnt && cnt.c) || 0, last_id: mid, preview, last_sender: (lastMsg && lastMsg.sender_name) || '' });
   });
 
   // 群文件：msg_type=file AND recalled=0 AND deleted=0

@@ -1,5 +1,5 @@
 /* 班级积分系统 v5.0 Service Worker：离线外壳缓存（仅缓存，不含推送） */
-const CACHE = 'cp-v61';
+const CACHE = 'cp-v86';
 const SHELL = ['/', '/index.html', '/new', '/history', '/chat', '/assets/apple.css', '/assets/common.js', '/assets/vendor/fontawesome/css/all.min.css'];
 
 self.addEventListener('install', e => {

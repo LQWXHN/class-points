@@ -106,12 +106,17 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
     if (running) return;
     running = true;
     try {
+      const peer = typeof peerUrl === 'function' ? await peerUrl() : peerUrl;
+      if (!peer) {
+        await setKv(db, 'sync_last_error', 'no online peer');
+        return;
+      }
       const lastOutId = Number(await getKv(db, 'sync_out_id') || 0);
       const myEvents = await db.all('SELECT * FROM sync_events WHERE id > ? ORDER BY id', lastOutId);
       let peerLastId = Number(await getKv(db, 'sync_peer_last_id') || 0);
       const myHost = (await getKv(db, 'sync_my_url')) || '';
 
-      const resp = await fetch(`${peerUrl}/api/sync`, {
+      const resp = await fetch(`${peer}/api/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Key': syncSecret },
         body: JSON.stringify({ peer: origin, last_id: peerLastId, events: myEvents }),
@@ -126,10 +131,10 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
 
       // 对方推过来的事件已经由 /api/sync 路由内部 replay 落库；这里补同步游标与文件
       if (data.events && data.events.length) {
-        await pullMissingFiles(db, peerUrl, syncSecret, data.events, myHost);
+        await pullMissingFiles(db, peer, syncSecret, data.events, myHost);
         await setKv(db, 'sync_peer_last_id', data.last_id);
       }
-      if (myEvents.length) await pushFiles(db, peerUrl, syncSecret, myEvents, myHost);
+      if (myEvents.length) await pushFiles(db, peer, syncSecret, myEvents, myHost);
       await setKv(db, 'sync_last_pull_at', Date.now());
       await setKv(db, 'sync_last_error', '');
     } catch (e) {

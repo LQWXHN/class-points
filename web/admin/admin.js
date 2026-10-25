@@ -247,8 +247,21 @@
     renderSideExtLinks();
     refreshData().then(() => switchPage('students')).catch(() => switchPage('students'));
     startPoll();
+    hydrateProfile();
     // 检查新系统公告
     setTimeout(() => checkNewSysAnns(), 500);
+  }
+  // 登录/刷新后立即拉取个人资料（含头像），避免首屏长期停留在字母占位
+  async function hydrateProfile() {
+    try {
+      const me2 = await CP.api('/auth/me');
+      const info = (me2 && me2.data) || me2;
+      if (info && currentUser) {
+        currentUser.avatar = info.avatar || '';
+        if (info.display_name) currentUser.display_name = info.display_name;
+        updateUserBar();
+      }
+    } catch (e) {}
   }
   function renderNav() {
     const isSuper = currentUser.role === 'super';
@@ -259,7 +272,8 @@
         const n = sysAnnUnreadCount(); badge = n > 99 ? '99+' : n;
       }
       if (page === 'chat' && window.__chatUnread > 0) badge = window.__chatUnread > 99 ? '99+' : window.__chatUnread;
-      return `<button class="nav-item" data-page="${page}" onclick="App.navClick('${page}',${opts&&opts.ext?1:0})"><i class="fas ${icon}"></i><span>${label}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
+      const preview = page === 'chat' ? `<span class="chat-nav-preview" id="chat-nav-preview"></span>` : '';
+      return `<button class="nav-item" data-page="${page}" onclick="App.navClick('${page}',${opts&&opts.ext?1:0})"><i class="fas ${icon}"></i><span class="nav-item-body"><span>${label}</span>${preview}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
     };
     let html = '';
     html += `<div class="nav-sec"><div class="nav-sec-t">数据管理</div>
@@ -1228,6 +1242,7 @@
     const c = $('rank-page-content'); if (!c) return;
     const d = uiState.biData;
     const fmtD = t => { const x = new Date(Number(t)); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+    const fmtDE = t => fmtD(Number(t) - 1);
     if (uiState.biShowHistory && uiState.biHistory) {
       c.innerHTML = `<div class="flex aic gap-10" style="margin-bottom:12px">
         <button class="btn btn-soft btn-sm" onclick="App.loadBiweekly('current')"><i class="fas fa-arrow-left"></i> 返回当前榜</button>
@@ -1235,17 +1250,18 @@
         <div class="rank-list">` + uiState.biHistory.map(h => `
           <div class="rank-item" style="cursor:pointer" onclick="App.loadBiweekly(${h.period_index})">
             <div class="rk-pos"><i class="fas fa-calendar" style="font-size:14px"></i></div>
-            <div class="rk-info"><div class="rk-name">第 ${h.period_index} 期</div>
-              <div class="rk-sub">${fmtD(h.period_start)} ~ ${fmtD(h.period_end)}</div></div>
+            <div class="rk-info"><div class="rk-name">第 ${h.period_index + 1} 期</div>
+              <div class="rk-sub">${fmtD(h.period_start)} ~ ${fmtDE(h.period_end)}</div></div>
             <div class="rk-pts"><i class="fas fa-chevron-right text-3"></i></div>
           </div>`).join('') + `</div>`;
       return;
     }
     if (!d) { c.innerHTML = '<div class="empty"><p>暂无数据</p></div>'; return; }
     const rows = d.rows || [];
+    const curTitle = d.not_started ? '当前双周（明日开始）' : (d.is_current ? '当前双周（进行中）' : '历史周期');
     let head = `<div class="flex aic" style="margin-bottom:10px">
-      <div><b style="font-size:14px">${d.is_current ? '当前双周（进行中）' : '历史周期'}</b>
-        <div class="text-3" style="font-size:11px">${fmtD(d.period_start)} ~ ${d.is_current ? '今天' : fmtD(d.period_end)}</div></div>
+      <div><b style="font-size:14px">${curTitle}</b>
+        <div class="text-3" style="font-size:11px">${fmtD(d.period_start)} ~ ${fmtDE(d.period_end)}</div></div>
       <span class="spacer"></span>`;
     if (d.is_current && uiState.biHistory) head += `<button class="btn btn-soft btn-sm" onclick="App.showBiweeklyHistory()"><i class="fas fa-clock-rotate-left"></i> 历史排行</button>`;
     head += `</div>`;
@@ -1915,12 +1931,54 @@
   function renderSitesRows(sites) {
     const box = $('sites-list'); if (!box) return;
     box.innerHTML = sites.map((s, i) => `
-      <div class="flex aic gap-10" style="padding:10px;background:var(--fill);border-radius:12px;margin-bottom:8px">
-        <i class="fas fa-globe text-3"></i>
-        <input class="form-input site-name" data-i="${i}" value="${CP.esc(s.name)}" style="max-width:160px;padding:7px 10px" placeholder="名称">
+      <div class="flex aic gap-10" style="padding:10px;background:var(--fill);border-radius:12px;margin-bottom:8px" draggable="true" data-i="${i}">
+        <i class="fas fa-grip-vertical text-3"></i>
+        <span class="site-dot" data-url="${CP.esc(s.url)}" style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block"></span>
+        <input class="form-input site-name" data-i="${i}" value="${CP.esc(s.name)}" style="max-width:140px;padding:7px 10px" placeholder="名称">
         <input class="form-input site-url" data-i="${i}" value="${CP.esc(s.url)}" style="flex:1;padding:7px 10px" placeholder="https://">
+        <span class="site-latency text-3" style="font-size:11px;min-width:40px"></span>
+        <button class="icon-btn" title="上移" onclick="App.sitesMoveRow(${i},-1)"><i class="fas fa-arrow-up"></i></button>
+        <button class="icon-btn" title="下移" onclick="App.sitesMoveRow(${i},1)"><i class="fas fa-arrow-down"></i></button>
         <button class="icon-btn" style="color:var(--red)" onclick="App.sitesDelRow(${i})"><i class="fas fa-trash"></i></button>
       </div>`).join('');
+    // v5.1: 拖拽排序
+    box.querySelectorAll('[draggable]').forEach(row => {
+      row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', row.dataset.i); });
+      row.addEventListener('dragover', e => { e.preventDefault(); });
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        const from = parseInt(e.dataTransfer.getData('text/plain'));
+        const to = parseInt(row.dataset.i);
+        if (isNaN(from) || isNaN(to) || from === to) return;
+        const s = parseSites();
+        const [item] = s.splice(from, 1);
+        s.splice(to, 0, item);
+        appData.config.sites = JSON.stringify(s);
+        renderSitesRows(s);
+      });
+    });
+    refreshSitesHealth();
+  }
+  async function refreshSitesHealth() {
+    try {
+      const r = await CP.api('/admin/sites-health', { handle401: false });
+      if (!r || !r.sites) return;
+      document.querySelectorAll('.site-dot').forEach(d => {
+        const url = d.dataset.url;
+        const h = r.sites.find(x => x.url === url);
+        if (h && h.online) { d.style.background = '#30d158'; d.nextElementSibling.nextElementSibling.nextElementSibling.textContent = h.latency_ms + 'ms'; }
+        else { d.style.background = '#ff3b30'; d.nextElementSibling.nextElementSibling.nextElementSibling.textContent = 'offline'; }
+      });
+    } catch {}
+  }
+  function sitesMoveRow(i, delta) {
+    const s = parseSites();
+    const j = i + delta;
+    if (j < 0 || j >= s.length) return;
+    const [item] = s.splice(i, 1);
+    s.splice(j, 0, item);
+    appData.config.sites = JSON.stringify(s);
+    renderSitesRows(s);
   }
   function sitesAddRow() {
     const s = parseSites(); s.push({ name: '新站点', url: '' });
@@ -2022,8 +2080,10 @@
         <div><div style="font-weight:600;font-size:14px">${CP.esc(me.display_name || me.username)}</div>
         <div class="text-3" style="font-size:11px">${me.role === 'super' ? '超级管理员' : '班主任'}</div></div>
       </div>
-      <button class="btn" style="justify-content:flex-start;width:100%" onclick="App.showProfilePop(this)"><i class="fas fa-user"></i> 个人信息</button>
-      <button class="btn" style="justify-content:flex-start;width:100%;color:var(--red)" onclick="App.logout()"><i class="fas fa-right-from-bracket"></i> 退出登录</button>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" style="justify-content:flex-start;width:100%" onclick="App.showProfilePop(this)"><i class="fas fa-user"></i> 个人信息</button>
+        <button class="btn" style="justify-content:flex-start;width:100%;color:var(--red)" onclick="App.logout()"><i class="fas fa-right-from-bracket"></i> 退出登录</button>
+      </div>
     </div>`;
     openPopover(ev && ev.currentTarget ? ev.currentTarget : $('user-avatar'), html);
   }
@@ -2806,7 +2866,7 @@
     doChangePwd,
     saveSiteTitle, saveCfg, saveResendFrom, saveSysInfo, onNotifySoundChange, uploadNotifySound,
     navClick, feedback, versionToast, avatarMenu, showProfilePop, closeAvatarPop, saveProfile,
-    sitesAddRow, sitesDelRow, saveSites, saveExtLinks,
+    sitesAddRow, sitesDelRow, sitesMoveRow, saveSites, saveExtLinks,
     renderResendKeyArea, showChangeApi, doChangeApi, clearApi,
     showGenCode, doGenCode, delDeviceCode, copyCode,
     showSuperSetPoints, doSuperSetPoints,
@@ -2855,17 +2915,19 @@
         if (e && e.status === 401) return; // onAdminUnauthorized 已处理
       }
       enterAdmin(role, name);
-      // v5.0 群聊未读角标
-      CP.pollChatUnread(function (n) {
-        window.__chatUnread = n;
-        renderNav();
-      });
-      // 进入后补全头像
-      try {
-        const me2 = await CP.api('/auth/me');
-        const info = (me2 && me2.data) || me2;
-        if (info && currentUser) { currentUser.avatar = info.avatar || ''; updateUserBar(); }
-      } catch (e) {}
+      // v5.1: 群聊未读角标 + 预览
+      async function refreshChatNav() {
+        try {
+          const r = await CP.api('/chat/unread-count', { handle401: false, noDeviceToken: true });
+          window.__chatUnread = r.count || 0;
+          renderNav();
+          const p = document.getElementById('chat-nav-preview');
+          if (p) p.textContent = (r.last_sender ? r.last_sender + '：' : '') + (r.preview || '暂无消息');
+        } catch {}
+      }
+      refreshChatNav();
+      setInterval(refreshChatNav, 10000);
+      if (CP.startGlobalChatSSE) CP.startGlobalChatSSE(refreshChatNav, refreshChatNav);
       return;
     }
     initAuth();

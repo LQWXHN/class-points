@@ -90,8 +90,7 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
   font-family: inherit;
 }
 .chat-input .icon-btn { width: 38px; height: 38px; }
-.chat-input .send-btn { display: none; }
-.chat-input.is-mobile .send-btn { display: inline-flex; }
+.chat-input .send-btn { display: inline-flex; align-items: center; justify-content: center; }
 @media (max-width: 600px) {
   .chat-row .body { max-width: 85%; }
 }
@@ -137,3 +136,28 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
 
 .chat-load-err { text-align:center; color: var(--chat-text-2); font-size: 14px; padding: 40px 16px; }
 .chat-load-err a { color: var(--chat-blue-deep); font-weight: 600; }
+
+/* v5.1: 时间分隔条 + 消息分组 */
+.chat-time-divider { text-align:center; color:var(--chat-text-2); font-size:11px; margin:8px 0; }
+.chat-row.grouped { margin-top:2px; }
+.chat-row.grouped .avatar-wrap, .chat-row.grouped .name { display:none; }
+.chat-row.grouped .body { margin-left:0; }
+.chat-row.me.grouped .body { margin-right:0; }
+
+/* v5.1: 发送失败重发 + 发送按钮 + 表情抽屉缩小 + 响应式 */
+.fail-retry { color:#ff3b30; font-size:16px; margin-top:4px; cursor:pointer; text-align:right; }
+#chat-send { background:#12B7F5; color:#fff; border:none; border-radius:18px; padding:8px 16px; font-size:14px; cursor:pointer; }
+#chat-send:disabled { background:#c8c7cc; cursor:not-allowed; }
+#chat-face-panel { width: 280px; max-width: 90vw; }
+#chat-face-grid { grid-template-columns: repeat(10, 28px); gap: 4px; padding: 8px; }
+#chat-face-grid img { width: 28px; height: 28px; }
+@media (max-width: 768px) {
+  #chat-face-panel { width: 240px; }
+  #chat-face-grid { grid-template-columns: repeat(8, 28px); }
+  .chat-row .bubble { max-width: 70vw; }
+}
+@media (max-width: 375px) {
+  #chat-face-panel { width: 220px; }
+  #chat-face-grid { grid-template-columns: repeat(7, 28px); }
+  .chat-row .bubble { max-width: 65vw; }
+}

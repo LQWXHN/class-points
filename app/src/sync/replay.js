@@ -456,6 +456,19 @@ export async function replayEvent(db, ev) {
     return;
   }
 
+  // v5.1 biweekly_snapshots：复合主键（period_start, kind, group_id），整行替换
+  if (tbl === 'biweekly_snapshots') {
+    const snap = parseSnap(ev.snapshot);
+    if (!snap || snap.period_start == null || !snap.kind || !snap.group_id) return;
+    await db.run(
+      `INSERT INTO biweekly_snapshots (period_start, kind, group_id, total, member_count, taken_at)
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT(period_start, kind, group_id) DO UPDATE SET total=excluded.total, member_count=excluded.member_count, taken_at=excluded.taken_at`,
+      String(snap.period_start), snap.kind, snap.group_id,
+      Number(snap.total) || 0, snap.member_count || 0, snap.taken_at || Date.now());
+    return;
+  }
+
   const opts = tbl === 'admin_config' ? { keyCol: 'key' } : {};
   await applyUpsert(db, ev, tbl, opts);
 }

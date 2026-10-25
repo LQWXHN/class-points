@@ -289,7 +289,7 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2); }
 
 /* ---------- 应用骨架：三栏 + 抽屉 ---------- */
-.app-shell { display: grid; grid-template-columns: 230px minmax(0,1fr) 330px; gap: 14px;
+.app-shell { display: grid; grid-template-columns: 248px minmax(0,1fr) 330px; gap: 14px;
   padding: 14px; max-width: 1760px; margin: 0 auto; align-items: start; min-height: 100vh; }
 .side { position: sticky; top: 14px; max-height: calc(100vh - 28px); overflow: hidden;
   display: flex; flex-direction: column; border-radius: var(--radius); box-shadow: var(--shadow);

@@ -11,6 +11,26 @@
   const isStaff = /^\/chat\/(teacher|admin)/.test(path) || path === '/chat-staff' || path === '/chat-staff.html';
   const isFront = !isStaff && (path === '/chat' || path === '/chat.html' || path === '/');
 
+  // v5.1：身份隔离——三种身份会话互不串用
+  // 前台 /chat：只走 X-Device-Token，移除 staff Bearer（防止后台切账号污染前台发送人）
+  // 后台 /chat/teacher、/chat/admin：只走 Bearer，移除设备 token（防止同浏览器设备态污染 staff 身份）
+  if (window.fetch && (isFront || isStaff)) {
+    const _fetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (init && init.headers && /\/api\/(chat|upload)/.test(url)) {
+          const h = new Headers(init.headers);
+          if (isFront) h.delete('Authorization');
+          if (isStaff) h.delete('X-Device-Token');
+          init.headers = h;
+        }
+      } catch {}
+      return _fetch(input, init);
+    };
+  }
+  function chatApi(p, opts) { return CP.api(p, opts); }
+
   // ---------- 状态 ----------
   const state = {
     me: null,
@@ -131,7 +151,12 @@
     connectStream();
     // 草稿恢复
     const draft = localStorage.getItem(LS_DRAFT + ':' + (state.me && state.me.member_key || 'front'));
-    if (draft) els.input.value = draft;
+    if (draft) {
+      els.input.value = draft;
+      els.input.style.height = 'auto';
+      els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
+      if (els.sendBtn) els.sendBtn.disabled = !draft.trim();
+    }
   }
 
   async function loadContext() {
@@ -174,27 +199,44 @@
     const prevScroll = keepScroll ? els.scroll.scrollHeight - els.scroll.scrollTop : 0;
     els.scroll.innerHTML = '';
     let lastDay = '';
+    let lastTs = 0;
+    let lastSender = '';
     let pastUnread = false;
-    for (const m of state.messages) {
+    for (let i = 0; i < state.messages.length; i++) {
+      const m = state.messages[i];
       const day = fmtDay(m.created_at);
       if (day !== lastDay) {
         const d = document.createElement('div');
         d.className = 'chat-day-divider'; d.textContent = day;
         els.scroll.appendChild(d);
-        lastDay = day;
+        lastDay = day; lastTs = 0; lastSender = '';
+      } else if (m.created_at - lastTs > 5 * 60 * 1000) {
+        const t = document.createElement('div');
+        t.className = 'chat-time-divider'; t.textContent = fmtHM(m.created_at);
+        els.scroll.appendChild(t);
       }
-      // 未读分割线：第一次遇到 id > myLastReadId 的消息
+      // 未读分割线
       if (!pastUnread && m.id > state.myLastReadId && state.myLastReadId > 0) {
         const u = document.createElement('div');
         u.className = 'chat-unread-divider'; u.textContent = '以下是未读消息';
         els.scroll.appendChild(u);
         pastUnread = true;
       }
-      els.scroll.appendChild(renderRow(m));
+      // 连续同发送者：hide avatar/name（QQ 习惯）
+      const grouped = (m.sender_key === lastSender) && !m.recalled;
+      els.scroll.appendChild(renderRow(m, grouped));
+      lastTs = m.created_at; lastSender = m.sender_key;
     }
+    if (keepScroll) els.scroll.scrollTop = els.scroll.scrollHeight - prevScroll;
   }
 
-  function renderRow(m) {
+  function fmtHM(ts) {
+    const d = new Date(ts);
+    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+
+  function renderRow(m, grouped) {
+    grouped = !!grouped;
     const me = state.me ? m.sender_key === state.me.member_key : false;
     const row = document.createElement('div');
     if (m.recalled) {
@@ -202,11 +244,11 @@
       row.innerHTML = `<div class="sys">${esc(m.sender_name)} 撤回了一条消息</div>`;
       return row;
     }
-    row.className = 'chat-row' + (me ? ' me' : '');
-    const av = CP.avatarHTML(m.sender_avatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
+    row.className = 'chat-row' + (me ? ' me' : '') + (grouped ? ' grouped' : '');
+    const av = grouped ? '' : CP.avatarHTML(m.sender_avatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
     let inner = '';
     // reply quote
-    if (m.reply && !m.reply.deleted) {
+    if (m.reply_to && m.reply && m.reply.sender_name && !m.reply.deleted) {
       const rqText = m.reply.msg_type === 'text' ? (m.reply.content || '') : (m.reply.msg_type === 'image' ? '[图片]' : '[文件]');
       inner += `<div class="reply-quote">${esc(m.reply.sender_name)}：${esc(rqText.slice(0,40))}</div>`;
     }
@@ -221,15 +263,18 @@
     } else if (m.msg_type !== 'image' && m.msg_type !== 'file') {
       inner += `<div class="bubble"></div>`;
     }
+    // v5.1: 失败红点
+    if (m.failed) inner += `<div class="fail-retry" title="点击重发"><i class="fas fa-exclamation-circle"></i></div>`;
     // 已读 n/N：只在自己最后一条消息旁显示
     const totalMembers = (state.members && state.members.length) || 3;
     const isOwnLast = me && m.id === state.lastId;
+    const nameHtml = (me || grouped) ? '' : `<div class="name">${esc(m.sender_name)}</div>`;
     row.innerHTML = `
       ${av}
       <div class="body">
-        ${me ? '' : `<div class="name">${esc(m.sender_name)}</div>`}
+        ${nameHtml}
         <div class="bubble-wrap" data-uid="${esc(m.uid)}" data-created="${m.created_at}">${inner}</div>
-        ${isOwnLast ? `<div class="read-mark">${m.read_count || 0}/${totalMembers} 已读 · ${fmtHM(m.created_at)}</div>` : `<div class="read-mark" style="color:var(--chat-text-2);font-size:11px;margin-top:2px">${fmtHM(m.created_at)}</div>`}
+        ${isOwnLast ? `<div class="read-mark">${m.read_count || 0}/${totalMembers} 已读</div>` : ''}
       </div>`;
     bindRowActions(row, m, me);
     return row;
@@ -238,6 +283,23 @@
   function bindRowActions(row, m, me) {
     const wrap = row.querySelector('.bubble-wrap');
     if (!wrap) return;
+    // v5.1: 失败点击重发
+    const fr = row.querySelector('.fail-retry');
+    if (fr) fr.onclick = async (e) => {
+      e.stopPropagation();
+      fr.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        const r = await CP.api('/chat/messages', { method: 'POST', body: m._body });
+        const idx = state.messages.findIndex(x => x.uid === m.uid);
+        if (idx >= 0) state.messages[idx] = r.message;
+        state.lastId = r.message.id;
+        state.myLastReadId = r.message.id;
+        renderMessages(true);
+      } catch (err) {
+        fr.innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+        CP.toast(err.message || '重发失败', 'error');
+      }
+    };
     wrap.addEventListener('click', e => {
       if (e.target.tagName === 'IMG' && m.msg_type === 'image') {
         openLightbox(m.attachments[0].url);
@@ -329,6 +391,20 @@
         } catch {}
       });
       state.es.addEventListener('notice', () => loadContext().catch(() => {}));
+      state.es.addEventListener('read', e => {
+        try {
+          const d = JSON.parse(e.data);
+          const mem = (state.members || []).find(m => m.member_key === d.member_key);
+          if (mem) { mem.last_read_id = d.last_read_id; mem.last_read_at = d.last_read_at; }
+          // 重算 read_count 并重渲染（不整体闪屏）
+          for (const m of state.messages) {
+            if (m.sender_key === state.me?.member_key) {
+              m.read_count = (state.members || []).filter(x => x.member_key !== m.sender_key && (x.last_read_id || 0) >= m.id).length;
+            }
+          }
+          renderMessages(true);
+        } catch {}
+      });
       state.es.onerror = () => {
         // SSE 断开，切轮询
         if (!state.usingPoll) {
@@ -357,6 +433,14 @@
       if (r.messages && r.messages.length) {
         for (const m of r.messages) onIncoming(m);
       }
+    } catch {}
+    // SSE 断连轮询期间，公告变更也保持实时
+    try {
+      const nc = await CP.api('/chat/notice', { handle401: false });
+      const d = (nc && nc.data) ? nc.data : nc;
+      const notice = d && d.notice ? d.notice : d;
+      const cur = state.notice && state.notice.content;
+      if (notice && notice.content !== cur) { state.notice = notice; loadContext().catch(() => {}); }
     } catch {}
   }
 
@@ -387,20 +471,25 @@
     const text = els.input.value.trim();
     if (!text) return;
     const body = { msg_type: 'text', content: text, reply_to: state.replyTo ? state.replyTo.uid : '' };
+    // v5.1: 先插入一条本地 pending 消息，失败标红可重发
+    const pending = { id: -Date.now(), uid: 'pending-' + Date.now(), sender_key: state.me.member_key, sender_name: state.me.name, sender_avatar: state.me.avatar, msg_type: 'text', content: text, attachments: [], reply_to: body.reply_to, reply: {}, recalled: 0, deleted: 0, created_at: Date.now(), failed: true, _body: body };
+    state.messages.push(pending);
+    els.input.value = '';
+    els.sendBtn.disabled = true;
+    localStorage.removeItem(LS_DRAFT + ':' + state.me.member_key);
+    state.replyTo = null; els.replyBar.classList.remove('show');
+    renderMessages(true); scrollToBottom();
     try {
       const r = await CP.api('/chat/messages', { method: 'POST', body });
-      els.input.value = '';
-      localStorage.removeItem(LS_DRAFT + ':' + state.me.member_key);
-      state.replyTo = null; els.replyBar.classList.remove('show');
-      // 自己发的直接插入（不等 SSE，SSE 已排除自己）
-      if (!state.messages.some(x => x.id === r.message.id)) {
-        state.messages.push(r.message);
-        state.lastId = r.message.id;
-        state.myLastReadId = r.message.id;
-        renderMessages(true);
-        scrollToBottom();
-      }
-    } catch (e) { CP.toast(e.message || '发送失败', 'error'); }
+      const idx = state.messages.findIndex(x => x.uid === pending.uid);
+      if (idx >= 0) state.messages[idx] = r.message;
+      state.lastId = r.message.id;
+      state.myLastReadId = r.message.id;
+      renderMessages(true); scrollToBottom();
+    } catch (e) {
+      // 失败消息保持在列表，点红点重发
+      CP.toast(e.message || '发送失败', 'error');
+    }
   }
 
   async function uploadAndSend(file, msgType) {
@@ -409,14 +498,15 @@
     fd.append('file', file);
     fd.append('prefix', 'chat');
     try {
-      const r = await CP.api('/upload', { method: 'POST', body: fd });
+      const upOpts = isStaff ? { noDeviceToken: true } : isFront ? { noStaffToken: true } : {};
+      const r = await CP.api('/upload', Object.assign({ method: 'POST', body: fd }, upOpts));
       const body = {
         msg_type: msgType,
         content: '',
         attachments: [{ name: r.name, size: r.size, type: r.type, url: r.url }],
         reply_to: state.replyTo ? state.replyTo.uid : '',
       };
-      const mr = await CP.api('/chat/messages', { method: 'POST', body });
+      const mr = await CP.api('/chat/messages', Object.assign({ method: 'POST', body }, upOpts));
       if (!state.messages.some(x => x.id === mr.message.id)) {
         state.messages.push(mr.message);
         state.lastId = mr.message.id;
@@ -428,7 +518,34 @@
 
   // ---------- 事件绑定 ----------
   function bindEvents() {
+    // v5.1: ESC 关闭所有面板
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        ['facePanel','searchPanel','favPanel','membersPanel','filesPanel'].forEach(k => {
+          if (els[k]) els[k].classList.remove('show');
+        });
+        CP.closeModal && CP.closeModal();
+      }
+    });
     els.sendBtn.onclick = send;
+    if (els.sendBtn) els.sendBtn.disabled = !els.input.value.trim();
+    // v5.1: 上滑到顶加载更早消息
+    els.scroll.addEventListener('scroll', async () => {
+      if (els.scroll.scrollTop < 40 && !state.loadingMore && state.messages.length) {
+        state.loadingMore = true;
+        try {
+          const firstId = state.messages[0].id;
+          const r = await CP.api(`/chat/messages?before=${firstId}&limit=50`, { handle401: false });
+          if (r.messages && r.messages.length) {
+            const prevH = els.scroll.scrollHeight;
+            state.messages = [...r.messages, ...state.messages];
+            renderMessages(false);
+            els.scroll.scrollTop = els.scroll.scrollHeight - prevH;
+          }
+        } catch {}
+        state.loadingMore = false;
+      }
+    });
     els.input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
@@ -438,6 +555,11 @@
     els.input.addEventListener('input', () => {
       const mk = state.me ? state.me.member_key : 'front';
       localStorage.setItem(LS_DRAFT + ':' + mk, els.input.value);
+      // v5.1: 发送按钮空内容禁用
+      if (els.sendBtn) els.sendBtn.disabled = !els.input.value.trim();
+      // 自适应高度
+      els.input.style.height = 'auto';
+      els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
     });
     els.imgBtn.onclick = () => els.imgInput.click();
     els.fileBtn.onclick = () => els.fileInput.click();
@@ -498,6 +620,23 @@
     renderFn();
   }
   window.closeChatPanel = () => els.panel.classList.remove('show');
+  // v5.1: 点抽屉外空白关闭（保留 X 与 ESC）
+  if (els.panel) {
+    const PANEL_OPENERS = ['chat-members', 'chat-files', 'chat-fav-btn', 'chat-search'];
+    document.addEventListener('click', e => {
+      if (!els.panel.classList.contains('show')) return;
+      if (els.panel.contains(e.target)) return;
+      if (PANEL_OPENERS.some(id => { const b = $(id); return b && b.contains(e.target); })) return;
+      els.panel.classList.remove('show');
+    });
+  }
+  if (els.facePanel) {
+    document.addEventListener('click', e => {
+      if (!els.facePanel.classList.contains('show')) return;
+      if (els.facePanel.contains(e.target) || els.faceBtn.contains(e.target)) return;
+      els.facePanel.classList.remove('show');
+    });
+  }
 
   function renderMembers() {
     els.panelBody.innerHTML = (state.members || []).map(m => `
@@ -606,7 +745,7 @@
   function buildFacePanel() {
     if (!state.faceManifest) { els.facePanel.style.display = 'none'; return; }
     els.facePanel.style.display = '';
-    const tabs = [['wx', 'QQ 经典'], ['qq', 'QQ 大表情']];
+    const tabs = [['wx', '经典表情'], ['qq', 'QQ 经典']];
     els.faceTabs.innerHTML = tabs.map(([k, label]) => `<button data-k="${k}">${label}</button>`).join('');
     els.faceTabs.querySelectorAll('button').forEach(b => {
       b.onclick = () => {

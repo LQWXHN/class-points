@@ -31,6 +31,7 @@ export function publicRoutes() {
       notify_sound_url: soundUrl,
       biweekly_rank_enabled: biweeklyEnabled,
       modal_blur_enabled: modalBlurEnabled,
+      instance: c.get('origin') === 'worker' ? 'worker' : 'node',
     });
   });
 

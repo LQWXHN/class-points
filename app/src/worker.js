@@ -22,6 +22,45 @@ function pickBucket(env) {
   return env.R2 || env.BUCKET;
 }
 
+// v5.1: 动态 peer 选择（真实探测 bootstrap，30s 缓存）
+let peerCache = { url: '', ts: 0 };
+async function probeBootstrap(url) {
+  const started = Date.now();
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 5000);
+    const r = await fetch(url.replace(/\/+$/, '') + '/api/public/bootstrap', { signal: c.signal, redirect: 'follow' });
+    clearTimeout(t);
+    if (!r.ok) return { online: false, instance: '' };
+    const j = await r.json().catch(() => ({}));
+    return { online: true, instance: j.instance || '', latency: Date.now() - started };
+  } catch { return { online: false, instance: '' }; }
+}
+async function resolvePeerUrl(env, db, selfInstance) {
+  if (peerCache.url && Date.now() - peerCache.ts < 30000) return peerCache.url;
+  let fallback = '';
+  if (selfInstance === 'worker') fallback = env.NODE_PEER_URL || env.HOME_PEER_URL || '';
+  else fallback = env.CF_PEER_URL || '';
+  try {
+    const row = await db.get('SELECT value FROM config WHERE key=?', 'sites');
+    if (row && row.value) {
+      const sites = JSON.parse(row.value);
+      for (const s of sites) {
+        const u = (s.url || '').replace(/\/+$/, '');
+        if (!u.startsWith('https://')) continue;
+        if (/127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost/.test(new URL(u).hostname)) continue;
+        const r = await probeBootstrap(u);
+        if (r.online && r.instance !== selfInstance) {
+          peerCache = { url: u, ts: Date.now() };
+          return u;
+        }
+      }
+    }
+  } catch {}
+  peerCache = { url: fallback, ts: Date.now() };
+  return fallback;
+}
+
 export default {
   async fetch(request, env, ctx) {
     setSyncOrigin('worker');
@@ -29,14 +68,14 @@ export default {
     const db = createWorkerDb(env.DB);
     const storage = createR2Storage(pickBucket(env));
     const syncSecret = env.SYNC_SECRET || '';
-    const peerUrl = env.NODE_PEER_URL || env.HOME_PEER_URL || '';
+    const peerUrl = await resolvePeerUrl(env, db, 'worker');
 
     const app = createApp({ db, storage, origin: 'worker', syncSecret, peerUrl });
 
     const url = new URL(request.url);
     const p = url.pathname;
 
-    // v5.0：群聊 /api/chat/* 全部反代到主站 HOME_PEER_URL（数据单源 SQLite）
+    // v5.0：群聊 /api/chat/* 全部反代到主站（数据单源 SQLite）
     // 鉴权透传：Authorization / X-Device-Token；SSE 流原样回传
     if (p.startsWith('/api/chat/') && peerUrl) {
       const target = peerUrl.replace(/\/+$/, '') + request.url.replace(/^https?:\/\/[^/]+/, '');
@@ -52,6 +91,31 @@ export default {
       const headers = new Headers(request.headers);
       if (syncSecret) headers.set('X-Sync-Key', syncSecret);
       return fetch(target, { method: 'POST', headers, body: request.body });
+    }
+
+    // v5.1：staff 在备用站登录时，让主站同时建会话，并把 D1 本地会话换成同一 token，
+    // 保证一个 token 对本地 D1 接口与反代到主站的 /api/chat/* 都有效（主站不可用时退回本地登录）
+    if (p === '/api/auth/login' && request.method === 'POST') {
+      const localRes = await app.fetch(request.clone(), env, ctx);
+      const localJson = await localRes.clone().json().catch(() => null);
+      if (localJson && localJson.ok && localJson.token && peerUrl) {
+        try {
+          const peerRes = await fetch(peerUrl.replace(/\/+$/, '') + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Sync-Key': syncSecret },
+            body: await request.clone().text(),
+          });
+          const peerJson = await peerRes.json().catch(() => null);
+          if (peerJson && peerJson.ok && peerJson.token) {
+            await db.run('UPDATE sessions SET token=? WHERE token=?', peerJson.token, localJson.token);
+            return new Response(JSON.stringify(peerJson), {
+              status: peerRes.status,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        } catch (e) { /* 主站不可达，使用本地会话 */ }
+      }
+      return localRes;
     }
 
     if (p.startsWith('/api/')) {
@@ -84,7 +148,7 @@ export default {
       const db = createWorkerDb(env.DB);
       const storage = createR2Storage(pickBucket(env));
       const syncSecret = env.SYNC_SECRET || '';
-      const peerUrl = env.NODE_PEER_URL || env.HOME_PEER_URL || '';
+      const peerUrl = await resolvePeerUrl(env, db, 'worker');
 
       // ---- 1. 同步 tick（每分钟）----
       try {

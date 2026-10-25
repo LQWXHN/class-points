@@ -15,20 +15,19 @@ function memberUrl(origin, member) {
   return origin + '/chat';
 }
 
-function enqueuePush(member, text, url) {
+function enqueuePush(member, text, url, summaryOverride) {
   const existing = pending.get(member.uid);
   if (existing) {
     existing.textParts.push(text);
     if (url) existing.url = url;
     return;
   }
-  const buf = { uid: member.uid, textParts: [text], atMs: Date.now(), url: url || '' };
+  const buf = { uid: member.uid, textParts: [text], atMs: Date.now(), url: url || '', summaryOverride: summaryOverride || '' };
   pending.set(member.uid, buf);
   setTimeout(() => {
     pending.delete(member.uid);
-    // 多条合并：summary 改为「x 条新消息」
     const multi = buf.textParts.length > 1;
-    const summary = multi ? '【班级积分系统】' + buf.textParts.length + ' 条新消息' : '【班级积分系统】新消息';
+    const summary = multi ? '【班级积分系统】' + buf.textParts.length + ' 条新消息' : (buf.summaryOverride || '【班级积分系统】新消息');
     sendWxMessageRaw(buf.uid, buf.textParts.join('\n'), buf.url, summary).catch(() => {});
   }, 30 * 1000);
 }
@@ -65,6 +64,20 @@ export async function pushChatMessage(db, msg, senderKey, opts) {
   const summary = summarize(msg);
   const text = `${msg.sender_name || '有人'}给你发了消息：${summary}`;
   for (const m of members) enqueuePush(m, text, memberUrl(opts.origin || '', m));
+}
+
+// v5.1：群公告变更推送（复用频控）
+export async function pushNotice(db, authorName, content, senderKey, opts) {
+  opts = opts || {};
+  if (!(await isEnabled(db))) return;
+  const appToken = await getAppToken(db);
+  if (!appToken) return;
+  globalThis.__WX_APP_TOKEN = appToken;
+  const members = await fetchMemberUids(db, senderKey);
+  if (!members.length) return;
+  const summary = content.length > 60 ? content.slice(0, 60) + '…' : content;
+  const text = `${authorName}更新了群公告：${summary}`;
+  for (const m of members) enqueuePush(m, text, memberUrl(opts.origin || '', m), '【班级积分系统】群公告');
 }
 
 async function getAppToken(db) {

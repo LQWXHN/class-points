@@ -126,6 +126,23 @@
 .nav-stack { display: flex; flex-direction: column; gap: 10px; }
 .nav-entry .badge-count { font-size: 12px; }
 
+/* 左栏统计卡片紧凑布局 */
+.side.left .card.glass { padding: 12px 12px 14px; }
+.side.left .card-title { font-size: 13px; margin-bottom: 9px; }
+.side.left .stat-grid { gap: 8px; }
+.side.left .stat-tile { padding: 9px 10px; min-width: 0; }
+.side.left .stat-tile .v { font-size: 19px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side.left .stat-tile .k { font-size: 11px; margin-top: 1px; white-space: nowrap; }
+
+/* 导航入口两行式（标题+预览） */
+.nav-entry-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-entry-body .t { display: flex; align-items: center; gap: 6px; }
+.nav-entry .chat-nav-preview { font-size: 11px; color: var(--text-2); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1024px) {
+  .side.left .stat-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
 /* 连接状态 */
 .conn-status { padding: 10px 12px; font-size: 11px; color: var(--text-3); text-align: center; border-top: 1px solid var(--separator); }
 .dot-on, .dot-off { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
