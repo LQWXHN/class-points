@@ -17,7 +17,7 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
 
   function fileBearing(tbl) {
     return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-      || tbl === 'system_announcements' || tbl === 'groups';
+      || tbl === 'system_announcements' || tbl === 'groups' || tbl === 'chat_messages';
   }
 
   // 从 snapshot 收集需要推/拉的 key（system_announcements 从 Markdown content 提取）
@@ -30,6 +30,16 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
         return k ? [k] : [];
       }
       return [];
+    }
+    if (tbl === 'chat_messages') {
+      // attachments 是数组 [{url, ...}]，提取 /api/file/ 开头的 url 对应的 key
+      const atts = Array.isArray(snap && snap.attachments) ? snap.attachments : [];
+      const out = [];
+      for (const a of atts) {
+        const k = keyFromUrl((a && a.url) || '');
+        if (k) out.push(k);
+      }
+      return out;
     }
     const k = keyFromUrl(snap && snap.file_url);
     return k ? [k] : [];
@@ -82,8 +92,8 @@ export function createRunner({ db, storage, peerUrl, syncSecret, origin, pollMs 
           if (!resp.ok) continue;
           const buf = Buffer.from(await resp.arrayBuffer());
           await storage.put(k, buf, snap.file_type || 'application/octet-stream');
-          // 仅单列 file_url 表需要重写本地行；system_announcements / groups 用相对路径无需改写
-          if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && snap.file_url) {
+          // 仅单列 file_url 表需要重写本地行；system_announcements / groups / chat_messages 用相对路径无需改写
+          if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && ev.tbl !== 'chat_messages' && snap.file_url) {
             const targetUrl = snap.file_url.replace(peerUrl, myHost);
             await db.run(`UPDATE ${ev.tbl} SET file_url=? WHERE uid=?`, targetUrl, ev.row_uid);
           }

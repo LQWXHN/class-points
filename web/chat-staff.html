@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>群聊 · 班级积分</title>
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=61">
+<link rel="stylesheet" href="/assets/apple.css?v=61">
+<link rel="stylesheet" href="/assets/page-chat.css?v=61">
+</head>
+<body>
+<div class="chat-app">
+  <header class="chat-topbar">
+    <button id="chat-back" class="icon-btn" title="返回"><i class="fas fa-arrow-left"></i></button>
+    <div class="title">
+      <div class="gname" id="chat-gname">群聊</div>
+      <div class="gsub" id="chat-gsub"></div>
+    </div>
+    <button id="chat-members" class="icon-btn" title="成员"><i class="fas fa-users"></i></button>
+    <button id="chat-fav-btn" class="icon-btn" title="我的收藏"><i class="fas fa-star"></i></button>
+    <button id="chat-files" class="icon-btn" title="群文件"><i class="fas fa-folder"></i></button>
+    <button id="chat-search" class="icon-btn" title="搜索"><i class="fas fa-search"></i></button>
+  </header>
+  <div id="chat-notice-bar" class="chat-notice-bar">
+    <span class="txt"></span>
+    <i class="fas fa-chevron-right"></i>
+  </div>
+  <div id="chat-scroll" class="chat-scroll"></div>
+  <div class="chat-input">
+    <div id="chat-reply-bar" class="reply-bar">
+      <span id="chat-reply-txt"></span>
+      <i id="chat-reply-cancel" class="fas fa-times cancel"></i>
+    </div>
+    <div class="row">
+      <button id="chat-face" class="icon-btn" title="表情"><i class="fas fa-face-smile"></i></button>
+      <button id="chat-img" class="icon-btn" title="图片"><i class="fas fa-image"></i></button>
+      <button id="chat-file" class="icon-btn" title="文件"><i class="fas fa-paperclip"></i></button>
+      <textarea id="chat-input" rows="1" placeholder="发消息…"></textarea>
+      <button id="chat-send" class="btn btn-primary send-btn" title="发送"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>
+</div>
+
+<div id="chat-panel" class="chat-panel">
+  <div class="ph"><h3 id="chat-panel-title">面板</h3><button class="icon-btn" onclick="closeChatPanel()"><i class="fas fa-xmark"></i></button></div>
+  <div id="chat-panel-body" class="pbody"></div>
+</div>
+
+<div id="chat-face-panel" class="face-panel">
+  <div class="ftabs" id="chat-face-tabs"></div>
+  <div class="fgrid" id="chat-face-grid"></div>
+</div>
+
+<div id="chat-lightbox" class="chat-lightbox">
+  <button class="nav prev" style="display:none"><i class="fas fa-chevron-left"></i></button>
+  <img id="chat-lightbox-img" src="" alt="">
+  <button class="nav next" style="display:none"><i class="fas fa-chevron-right"></i></button>
+</div>
+
+<input type="file" id="chat-img-input" accept="image/*" hidden>
+<input type="file" id="chat-file-input" hidden>
+
+<script src="/assets/common.js?v=61"></script>
+<script src="/assets/page-chat.js?v=61"></script>
+</body>
+</html>

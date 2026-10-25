@@ -17,7 +17,7 @@ async function toBuffer(x) {
 // 带附件引用的表（附件自愈扫描覆盖）
 function fileBearingTable(tbl) {
   return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-    || tbl === 'system_announcements' || tbl === 'groups';
+    || tbl === 'system_announcements' || tbl === 'groups' || tbl === 'chat_messages';
 }
 
 // 从事件 snapshot 中收集所有需要推/拉的存储 key（system_announcements 从 Markdown content 提取）
@@ -32,6 +32,15 @@ function keysFromSnap(tbl, snap) {
       return k ? [k] : [];
     }
     return [];
+  }
+  if (tbl === 'chat_messages') {
+    const atts = Array.isArray(snap && snap.attachments) ? snap.attachments : [];
+    const out = [];
+    for (const a of atts) {
+      const k = keyFromUrl((a && a.url) || '');
+      if (k) out.push(k);
+    }
+    return out;
   }
   const k = keyFromUrl(snap && snap.file_url);
   return k ? [k] : [];
@@ -132,8 +141,8 @@ async function pullMissingFiles(db, storage, peerUrl, secret, events) {
         const ct = r.headers.get('content-type') || snap.file_type || 'application/octet-stream';
         await storage.put(k, buf, ct);
         // 重写本端行 file_url 为本地相对路径（本站 /api/file 会解析到 R2）
-        // system_announcements / groups 的图片以相对路径嵌入，两端都直接可访问，无需改写
-        if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && snap.file_url) {
+        // system_announcements / groups / chat_messages 的附件以相对路径嵌入，两端都直接可访问，无需改写
+        if (ev.tbl !== 'announcement_versions' && ev.tbl !== 'system_announcements' && ev.tbl !== 'groups' && ev.tbl !== 'chat_messages' && snap.file_url) {
           await db.run(`UPDATE ${ev.tbl} SET file_url=? WHERE uid=?`, `/api/file/${encodeURIComponent(k)}`, ev.row_uid);
         }
       } catch (e) { /* ignore */ }

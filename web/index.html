@@ -7,9 +7,9 @@
 <title>班级积分系统</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=56">
-<link rel="stylesheet" href="/assets/apple.css?v=56">
-<link rel="stylesheet" href="/assets/page-index.css?v=56">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=57">
+<link rel="stylesheet" href="/assets/apple.css?v=57">
+<link rel="stylesheet" href="/assets/page-index.css?v=57">
 </head>
 <body>
 
@@ -47,6 +47,11 @@
       </div>
 
       <div class="nav-stack">
+        <button class="nav-entry" onclick="location.href='/chat'">
+          <i class="fas fa-comments"></i>
+          <span class="t">消息</span>
+          <i class="fas fa-chevron-right chev"></i>
+        </button>
         <button class="nav-entry" onclick="location.href='/history'">
           <i class="fas fa-clock-rotate-left"></i>
           <span class="t">历史记录</span>
@@ -139,7 +144,16 @@
   </aside>
 </div>
 
-<script src="/assets/common.js?v=56"></script>
-<script src="/assets/page-index.js?v=56"></script>
+<script src="/assets/common.js?v=57"></script>
+<script src="/assets/page-index.js?v=57"></script>
+<script>
+// v5.0 群聊未读角标
+CP.pollChatUnread(function(n){
+  const b = document.getElementById('chat-unread-badge');
+  if (!b) return;
+  b.style.display = n > 0 ? '' : 'none';
+  b.textContent = n > 99 ? '99+' : n;
+});
+</script>
 </body>
 </html>

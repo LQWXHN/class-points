@@ -42,6 +42,7 @@ await migrateV46(db);
 await migrateV47(db);
 await migrateV48(db);
 await migrateV49(db);
+await migrateV50(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -138,6 +139,14 @@ async function migrateV46(db) {
 // v4.7 幂等迁移：删除聊天/IM 模块（chat_messages/chat_favorites/chat_stickers/chat_reads/push_subscriptions）
 // 及相关 config 键与同步事件。保留反馈表 feedback_messages。
 async function migrateV47(db) {
+  // v4.7 清理 v4.6 聊天模块；但 v5.0 复用了同名表（chat_messages 等），
+  // 若检测到 v5.0 表结构（含 uid 列）则整段跳过，避免每次重启把群聊数据清空。
+  const cols = await db.all('PRAGMA table_info(chat_messages)');
+  const isV50 = (cols || []).some(c => c.name === 'uid');
+  if (isV50) {
+    // v4.7 版本号也不再覆盖（由后续 migrate 设置）
+    return;
+  }
   // 按外键依赖顺序 DROP（先子后父，此处无显式外键，顺序不影响）
   await db.run('DROP TABLE IF EXISTS chat_reads');
   await db.run('DROP TABLE IF EXISTS chat_stickers');
@@ -205,6 +214,81 @@ async function migrateV49(db) {
   if (!vRow) await setConfig(db, 'system_version', 'v4.9（2026-10-25）');
 }
 
+// v5.0 幂等迁移：群聊模块（四表必须在此显式建，因为 migrateV47 会 DROP 旧 chat 表）+ admin_users.wxpusher_uid 列 + 默认配置
+async function migrateV50(db) {
+  // 显式建四表（IF NOT EXISTS 幂等；schema.sql 也有，但 migrateV47 会 DROP，所以这里必须再建）
+  await db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT NOT NULL UNIQUE,
+    sender_key TEXT NOT NULL,
+    sender_name TEXT NOT NULL,
+    sender_avatar TEXT NOT NULL DEFAULT '',
+    msg_type TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    attachments TEXT NOT NULL DEFAULT '[]',
+    reply_to TEXT NOT NULL DEFAULT '',
+    recalled INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0
+  )`);
+  await db.run('CREATE INDEX IF NOT EXISTS idx_chat_msg_time ON chat_messages(created_at)');
+  await db.run('CREATE INDEX IF NOT EXISTS idx_chat_msg_reply ON chat_messages(reply_to)');
+
+  await db.run(`CREATE TABLE IF NOT EXISTS chat_reads (
+    member_key TEXT PRIMARY KEY,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    last_read_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS chat_favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_key TEXT NOT NULL,
+    msg_uid TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(member_key, msg_uid)
+  )`);
+  await db.run('CREATE INDEX IF NOT EXISTS idx_chat_fav_member ON chat_favorites(member_key)');
+
+  await db.run(`CREATE TABLE IF NOT EXISTS chat_notices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL,
+    author TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  // admin_users.wxpusher_uid 列
+  const auCols = await db.all('PRAGMA table_info(admin_users)');
+  const auNames = new Set((auCols || []).map(c => c.name));
+  if (!auNames.has('wxpusher_uid')) {
+    await db.run("ALTER TABLE admin_users ADD COLUMN wxpusher_uid TEXT NOT NULL DEFAULT ''");
+  }
+
+  const defaults = {
+    chat_group_name: '二班群',
+    chat_enabled: '1',
+    chat_notice: '欢迎使用班级群，请文明发言',
+    wxpusher_app_token: '',
+    wxpusher_enabled: '0',
+    chat_front_push_channel: 'browser',
+    wxpusher_uid_front: '',
+    front_account_name: '二班学生',
+    front_account_avatar: '👦',
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    const row = await db.get('SELECT key FROM admin_config WHERE key=?', k);
+    if (!row) await setConfig(db, k, v);
+  }
+
+  await db.run("UPDATE admin_config SET value='v5.0（2026-10-25）' WHERE key='system_version'");
+  const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
+  if (!vRow) await setConfig(db, 'system_version', 'v5.0（2026-10-25）');
+}
+
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed
 
 const app = createApp({ db, storage, origin: 'node', syncSecret, peerUrl });
@@ -216,7 +300,9 @@ const pageMap = {
   '/ae': '/ae.html',
   '/history': '/history.html',
   '/new': '/new.html',
-  '/send': '/send.html',
+  '/chat': '/chat.html',
+  '/chat/teacher': '/chat-staff.html',
+  '/chat/admin': '/chat-staff.html',
   '/admin': '/admin/index.html',
 };
 app.all('*', async (c) => {

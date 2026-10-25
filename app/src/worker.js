@@ -11,7 +11,9 @@ const PAGE_REWRITES = {
   '/ae': '/ae.html',
   '/history': '/history.html',
   '/new': '/new.html',
-  '/send': '/send.html',
+  '/chat': '/chat.html',
+  '/chat/teacher': '/chat-staff.html',
+  '/chat/admin': '/chat-staff.html',
   '/admin': '/admin/index.html',
 };
 
@@ -34,6 +36,24 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
 
+    // v5.0：群聊 /api/chat/* 全部反代到主站 HOME_PEER_URL（数据单源 SQLite）
+    // 鉴权透传：Authorization / X-Device-Token；SSE 流原样回传
+    if (p.startsWith('/api/chat/') && peerUrl) {
+      const target = peerUrl.replace(/\/+$/, '') + request.url.replace(/^https?:\/\/[^/]+/, '');
+      const headers = new Headers(request.headers);
+      if (syncSecret) headers.set('X-Sync-Key', syncSecret);
+      // 保留原鉴权头；Authorization / X-Device-Token 已自动透传
+      const init = { method: request.method, headers, body: ['GET','HEAD'].includes(request.method) ? undefined : request.body };
+      return fetch(target, init);
+    }
+    // v5.0：WxPusher 订阅回调走主站（WxPusher 配置主站 URL，但保险起见 worker 也代理）
+    if (p === '/api/wxpusher/callback' && peerUrl) {
+      const target = peerUrl.replace(/\/+$/, '') + '/api/wxpusher/callback';
+      const headers = new Headers(request.headers);
+      if (syncSecret) headers.set('X-Sync-Key', syncSecret);
+      return fetch(target, { method: 'POST', headers, body: request.body });
+    }
+
     if (p.startsWith('/api/')) {
       return app.fetch(request, env, ctx);
     }
@@ -41,15 +61,20 @@ export default {
     // 无后缀路由重写（含末尾斜杠归一）
     const normPath = p === '/' ? '/' : p.replace(/\/+$/, '');
     let targetPath = p;
+    const firstSeg = '/' + (normPath.split('/').filter(Boolean)[0] || '');
     if (PAGE_REWRITES[normPath]) targetPath = PAGE_REWRITES[normPath];
-    else {
-      const firstSeg = '/' + (normPath.split('/').filter(Boolean)[0] || '');
-      if (PAGE_REWRITES[firstSeg]) targetPath = PAGE_REWRITES[firstSeg];
+    else if (PAGE_REWRITES[firstSeg]) targetPath = PAGE_REWRITES[firstSeg];
+    // v5.0：/chat/teacher 与 /chat/admin 用 302 跳到 /chat-staff.html（ASSETS 绑定对跨段重写不稳定）
+    if (normPath === '/chat/teacher' || normPath === '/chat/admin') {
+      return Response.redirect(new URL('/chat-staff.html', request.url).toString(), 302);
+    }
+    // 未匹配的路径（如已下线的 /send）直接 404，不要走 ASSETS 导致 500
+    if (targetPath === p && !PAGE_REWRITES[normPath] && !PAGE_REWRITES[firstSeg]) {
+      return new Response('Not Found', { status: 404 });
     }
     const newUrl = new URL(request.url);
     newUrl.pathname = targetPath;
-    const req2 = new Request(newUrl.toString(), request);
-    return env.ASSETS.fetch(req2, env, ctx);
+    return env.ASSETS.fetch(newUrl.toString());
   },
 
   // cron：每分钟跑同步；04:00 UTC 自动备份

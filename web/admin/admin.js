@@ -258,6 +258,7 @@
       if (page === 'system-announcements' && sysAnnUnreadCount() > 0) {
         const n = sysAnnUnreadCount(); badge = n > 99 ? '99+' : n;
       }
+      if (page === 'chat' && window.__chatUnread > 0) badge = window.__chatUnread > 99 ? '99+' : window.__chatUnread;
       return `<button class="nav-item" data-page="${page}" onclick="App.navClick('${page}',${opts&&opts.ext?1:0})"><i class="fas ${icon}"></i><span>${label}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
     };
     let html = '';
@@ -268,7 +269,8 @@
     html += `<div class="nav-sec"><div class="nav-sec-t">动态与排行</div>
       ${item('system-announcements', 'fa-bullhorn', '系统公告')}
       ${item('rankings', 'fa-trophy', '排行榜')}
-      ${item('tier-rules', 'fa-crown', '段位规则')}</div>`;
+      ${item('tier-rules', 'fa-crown', '段位规则')}
+      ${item('chat', 'fa-comments', '群聊', {ext:1})}</div>`;
     html += `<div class="nav-sec"><div class="nav-sec-t">记录与备份</div>
       ${item('records', 'fa-clock-rotate-left', '历史记录', {ext:1})}
       ${item('export', 'fa-file-export', '导出记录')}
@@ -289,6 +291,7 @@
   }
   function navClick(page, isExt) {
     if (page === 'records') { location.href = '/history?from=admin'; return; }
+    if (page === 'chat') { location.href = (currentUser.role === 'super') ? '/chat/admin' : '/chat/teacher'; return; }
     switchPage(page);
   }
   /* v4.5 聚合更多菜单（CP.moreMenu(anchor) 由 common.js 提供） */
@@ -1666,9 +1669,92 @@
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.notify_on_master_code === '1' ? 'checked' : ''} onchange="App.saveCfg('notify_on_master_code',this.checked)"><span class="slider"></span></label><span>万能激活码使用时通知</span></div>
       <button class="btn btn-primary" onclick="App.saveResendFrom()"><i class="fas fa-save"></i> 保存邮件设置</button>
       ` : ''}
-    </div>`;
+
+      <h3 class="sec-t mt-20">群聊与通知（WxPusher）</h3>
+      <p class="text-3" style="font-size:12px;margin:0 0 10px">新消息通过 WxPusher 推送到微信/Windows 客户端；三个成员（前台大屏 / 班主任 / 超管）分别绑定自己的 UID 即可收到。</p>
+      <div class="form-row"><label class="form-label">群名</label>
+        <input id="wxp-group-name" class="form-input" value="${CP.esc(appData.config.chat_group_name || '二班群')}"></div>
+      ${isSuper ? `
+      <div class="form-row"><label class="form-label">WxPusher AppToken</label>
+        <input id="wxp-app-token" class="form-input" type="password" value="${CP.esc(appData.config.wxpusher_app_token || '')}" placeholder="留空则未配置"></div>
+      <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.wxpusher_enabled === '1' ? 'checked' : ''} onchange="App.saveWxpSettings({enabled:this.checked?'1':'0'})"><span class="slider"></span></label><span>启用 WxPusher 推送</span></div>
+      ` : `<p class="text-3" style="font-size:12px">AppToken 与开关由超管配置。</p>`}
+      <button class="btn btn-primary" onclick="App.saveWxpSettings()"><i class="fas fa-save"></i> 保存群聊设置</button>
+      <div id="wxp-members-box" style="margin-top:12px"></div>
+    `;
     if (isSuper) renderResendKeyArea();
     loadDeviceCodes();
+    loadWxpMembers();
+  }
+
+  async function loadWxpMembers() {
+    const box = $('wxp-members-box'); if (!box) return;
+    try {
+      const s = await CP.api('/wxpusher/status');
+      const rows = [
+        { key: 'front', name: s.me && s.me.role === 'front' ? s.me.name : '前台大屏（二班学生）' },
+        { key: 'teacher', name: '班主任' },
+        { key: 'admin', name: '超级管理员' },
+      ];
+      box.innerHTML = '<div class="table-wrap"><table class="cp-table"><thead><tr><th>成员</th><th>角色</th><th>状态</th><th style="width:200px">操作</th></tr></thead><tbody>' +
+        rows.map(r => {
+          const m = (s.members || []).find(x => x.member_key === r.key);
+          const bound = m && m.bound;
+          const roleName = m ? (m.role === 'super' ? '管理员' : m.role === 'teacher' ? '老师' : '前台') : r.key;
+          return `<tr>
+            <td>${CP.esc(m ? m.name : r.name)}</td>
+            <td>${CP.esc(roleName)}</td>
+            <td>${bound ? '<span class="badge badge-blue">已绑定</span>' : '<span class="badge">未绑定</span>'}</td>
+            <td>
+              ${bound ? `<button class="btn btn-sm btn-danger" onclick="App.wxpUnbind('${r.key}')">解绑</button>`
+                      : `<button class="btn btn-sm btn-primary" onclick="App.wxpBind('${r.key}')">绑定</button>`}
+            </td>
+          </tr>`;
+        }).join('') + '</tbody></table></div>';
+    } catch (e) { box.innerHTML = '<p class="text-3">加载绑定状态失败</p>'; }
+  }
+
+  async function wxpBind(memberKey) {
+    try {
+      const r = await CP.api('/wxpusher/bind-qrcode', { method: 'POST', body: { member_key: memberKey } });
+      if (!r.ok) { CP.toast(r.error || '绑定失败', 'error'); return; }
+      CP.modal(`<h3>绑定：${CP.esc(memberKey)}</h3>
+        <p style="font-size:13px;color:var(--text-2)">用 WxPusher App（手机/电脑客户端）扫码，或点关注链接完成绑定。</p>
+        <div style="text-align:center;margin:8px 0">
+          ${r.image ? `<img src="${CP.esc(r.image)}" style="max-width:240px;border:1px solid var(--line)">` : ''}
+        </div>
+        ${r.url ? `<p style="font-size:12px;word-break:break-all;color:var(--text-2)">关注链接：<br>${CP.esc(r.url)}</p>` : ''}
+        <div class="modal-foot">
+          ${r.url ? `<button class="btn" onclick="App.copyWxpUrl('${CP.esc(r.url)}')"><i class="fas fa-copy"></i> 复制关注链接</button>` : ''}
+          <button class="btn btn-primary" onclick="CP.closeModal()">关闭</button>
+        </div>`, { size: 'sm' });
+    } catch (e) { CP.toast(e.message || '绑定失败', 'error'); }
+  }
+
+  async function wxpUnbind(memberKey) {
+    try {
+      await CP.api('/wxpusher/unbind', { method: 'POST', body: { member_key: memberKey } });
+      CP.toast('已解绑', 'success');
+      loadWxpMembers();
+    } catch (e) { CP.toast(e.message || '解绑失败', 'error'); }
+  }
+
+  async function saveWxpSettings(extra) {
+    try {
+      const body = Object.assign({}, extra || {});
+      const gn = $('wxp-group-name') && $('wxp-group-name').value;
+      if (gn) body.group_name = gn;
+      const at = $('wxp-app-token') && $('wxp-app-token').value;
+      if (at) body.app_token = at;
+      await CP.api('/wxpusher/settings', { method: 'POST', body });
+      CP.toast('已保存', 'success');
+      refreshData();
+    } catch (e) { CP.toast(e.message || '保存失败', 'error'); }
+  }
+
+  async function copyWxpUrl(url) {
+    try { await navigator.clipboard.writeText(url); CP.toast('已复制', 'success'); }
+    catch { CP.toast('复制失败', 'error'); }
   }
 
   /* ----- 段位规则编辑 ----- */
@@ -2726,6 +2812,7 @@
     showSuperSetPoints, doSuperSetPoints,
     showAddUser, doAddUser, showEditUser, doUpdateUser, delUser,
     delDevice,
+    loadWxpMembers, wxpBind, wxpUnbind, saveWxpSettings, copyWxpUrl,
   };
 
   /* ---------- 401 回到登录屏 ---------- */
@@ -2768,6 +2855,11 @@
         if (e && e.status === 401) return; // onAdminUnauthorized 已处理
       }
       enterAdmin(role, name);
+      // v5.0 群聊未读角标
+      CP.pollChatUnread(function (n) {
+        window.__chatUnread = n;
+        renderNav();
+      });
       // 进入后补全头像
       try {
         const me2 = await CP.api('/auth/me');

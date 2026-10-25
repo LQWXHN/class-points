@@ -19,6 +19,8 @@ import { syncRoutes } from './routes/sync.js';
 import { snapshotRoutes } from './routes/snapshot.js';
 import { feedbackRoutes } from './routes/feedback.js';
 import { publicRoutes } from './routes/public.js';
+import { chatRoutes } from './routes/chat.js';
+import { wxpusherRoutes } from './routes/wxpusher.js';
 
 export function createApp({ db, storage, origin = 'node', syncSecret = '', peerUrl = '' }) {
   const app = new Hono();
@@ -56,6 +58,8 @@ export function createApp({ db, storage, origin = 'node', syncSecret = '', peerU
   app.route('/api', snapshotRoutes());
   app.route('/api', feedbackRoutes());
   app.route('/api', publicRoutes());
+  app.route('/api', chatRoutes());
+  app.route('/api', wxpusherRoutes());
 
   app.onError((err, c) => {
     console.error('[app error]', err);

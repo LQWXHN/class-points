@@ -347,6 +347,84 @@ async function applyUpsert(db, ev, table, opts = {}) {
     }
     return;
   }
+
+  // v5.0 chat_messages：upsert LWW + 软删
+  if (table === 'chat_messages') {
+    if (ev.op === 'delete') {
+      await db.run('UPDATE chat_messages SET deleted=1, updated_at=? WHERE uid=?',
+        snap.updated_at || Date.now(), keyVal);
+      return;
+    }
+    if (local) {
+      await db.run(
+        `UPDATE chat_messages SET sender_key=?, sender_name=?, sender_avatar=?, msg_type=?,
+                content=?, attachments=?, reply_to=?, recalled=?, updated_at=?, deleted=0 WHERE uid=?`,
+        snap.sender_key || '', snap.sender_name || '', snap.sender_avatar || '', snap.msg_type || 'text',
+        snap.content || '', typeof snap.attachments === 'string' ? snap.attachments : JSON.stringify(snap.attachments || []),
+        snap.reply_to || '', snap.recalled ? 1 : 0,
+        snap.updated_at || Date.now(), keyVal);
+    } else {
+      await db.run(
+        `INSERT INTO chat_messages (uid, sender_key, sender_name, sender_avatar, msg_type,
+                content, attachments, reply_to, recalled, created_at, updated_at, deleted)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,0)`,
+        keyVal, snap.sender_key || '', snap.sender_name || '', snap.sender_avatar || '', snap.msg_type || 'text',
+        snap.content || '', typeof snap.attachments === 'string' ? snap.attachments : JSON.stringify(snap.attachments || []),
+        snap.reply_to || '', snap.recalled ? 1 : 0,
+        snap.created_at || Date.now(), snap.updated_at || Date.now());
+    }
+    return;
+  }
+
+  // v5.0 chat_reads：按 member_key upsert
+  if (table === 'chat_reads') {
+    if (ev.op === 'delete') {
+      await db.run('DELETE FROM chat_reads WHERE member_key=?', keyVal);
+      return;
+    }
+    await db.run(
+      `INSERT INTO chat_reads (member_key, last_read_id, last_read_at, updated_at)
+       VALUES (?,?,?,?)
+       ON CONFLICT(member_key) DO UPDATE SET last_read_id=?, last_read_at=?, updated_at=?`,
+      keyVal, snap.last_read_id || 0, snap.last_read_at || Date.now(), snap.updated_at || Date.now(),
+      snap.last_read_id || 0, snap.last_read_at || Date.now(), snap.updated_at || Date.now());
+    return;
+  }
+
+  // v5.0 chat_favorites：幂等插入；delete 按 member_key+msg_uid
+  if (table === 'chat_favorites') {
+    if (ev.op === 'delete') return;
+    const memberKey = snap.member_key || '';
+    const msgUid = snap.msg_uid || '';
+    if (!memberKey || !msgUid) return;
+    const exists = await db.get(
+      'SELECT id FROM chat_favorites WHERE member_key=? AND msg_uid=?', memberKey, msgUid);
+    if (exists) return;
+    await db.run(
+      'INSERT INTO chat_favorites (member_key, msg_uid, created_at) VALUES (?,?,?)',
+      memberKey, msgUid, snap.created_at || Date.now());
+    return;
+  }
+
+  // v5.0 chat_notices：upsert LWW + 软删
+  if (table === 'chat_notices') {
+    if (ev.op === 'delete') {
+      await db.run('UPDATE chat_notices SET deleted=1, updated_at=? WHERE uid=?',
+        snap.updated_at || Date.now(), keyVal);
+      return;
+    }
+    if (local) {
+      await db.run(
+        'UPDATE chat_notices SET content=?, author=?, updated_at=?, deleted=0 WHERE uid=?',
+        snap.content || '', snap.author || '', snap.updated_at || Date.now(), keyVal);
+    } else {
+      await db.run(
+        'INSERT INTO chat_notices (uid, content, author, created_at, updated_at, deleted) VALUES (?,?,?,?,?,0)',
+        keyVal, snap.content || '', snap.author || '',
+        snap.created_at || Date.now(), snap.updated_at || Date.now());
+    }
+    return;
+  }
 }
 
 export async function replayEvent(db, ev) {

@@ -734,6 +734,24 @@
     CP.toast(v, 'info', 3000);
   };
 
+  /* ---------- 群聊未读角标（v5.0） ---------- */
+  CP.pollChatUnread = function (onUpdate) {
+    // 30s 一次，页面隐藏时跳过
+    let lastCount = -1;
+    async function tick() {
+      if (document.hidden) return;
+      try {
+        const r = await CP.api('/chat/unread-count', { handle401: false });
+        if (r && typeof r.count === 'number' && r.count !== lastCount) {
+          lastCount = r.count;
+          try { onUpdate(r.count); } catch {}
+        }
+      } catch {}
+    }
+    tick();
+    setInterval(tick, 30000);
+  };
+
   /* ---------- SW 注册（离线外壳缓存） ---------- */
   CP.registerSW = function () {
     if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;

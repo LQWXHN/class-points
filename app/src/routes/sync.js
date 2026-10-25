@@ -6,7 +6,7 @@ import { performBackup, listBackupFiles } from './backup.js';
   // 事件携带的附件引用若本地缺失，加入 need_files 向对端索要
 function fileBearingTable(tbl) {
   return tbl === 'announcements' || tbl === 'front_messages' || tbl === 'announcement_versions'
-    || tbl === 'system_announcements' || tbl === 'groups';
+    || tbl === 'system_announcements' || tbl === 'groups' || tbl === 'chat_messages';
 }
 async function collectNeedFile(storage, needFiles, tbl, rowUid, snap) {
   if (!snap) return;
@@ -19,6 +19,19 @@ async function collectNeedFile(storage, needFiles, tbl, rowUid, snap) {
       if (k && !(await storage.exists(k))) {
         needFiles.push({ row_uid: rowUid, url: av, name: k.split('/').pop() || '', type: 'image/*' });
       }
+    }
+    return;
+  }
+  // v5.0 chat_messages：attachments 数组，提取 /api/file/ 引用
+  if (tbl === 'chat_messages') {
+    const atts = Array.isArray(snap.attachments) ? snap.attachments : [];
+    for (const a of atts) {
+      const url = (a && a.url) || '';
+      const k = keyFromUrl(url);
+      if (!k) continue;
+      if (await storage.exists(k)) continue;
+      if (needFiles.some(x => keyFromUrl(x.url || '') === k)) continue;
+      needFiles.push({ row_uid: rowUid, url, name: (a && a.name) || k.split('/').pop(), type: (a && a.type) || '' });
     }
     return;
   }

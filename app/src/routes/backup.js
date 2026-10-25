@@ -11,10 +11,17 @@ export async function buildBackup(db) {
      WHERE key NOT IN ('password_hash','password_salt','resend_api_key','resend_from','notify_email')`);
   const config = {};
   for (const r of cfgRows) config[r.key] = r.value;
+  // v5.0 群聊四表
+  let chat_messages = [], chat_reads = [], chat_favorites = [], chat_notices = [];
+  try { chat_messages = await db.all('SELECT * FROM chat_messages WHERE deleted=0 ORDER BY id'); } catch {}
+  try { chat_reads = await db.all('SELECT * FROM chat_reads'); } catch {}
+  try { chat_favorites = await db.all('SELECT * FROM chat_favorites'); } catch {}
+  try { chat_notices = await db.all('SELECT * FROM chat_notices WHERE deleted=0 ORDER BY id'); } catch {}
   return {
-    version: '4.0',
+    version: '5.0',
     exportedAt: new Date().toISOString(),
     students, groups, rules, announcements, config,
+    chat_messages, chat_reads, chat_favorites, chat_notices,
   };
 }
 
@@ -311,6 +318,44 @@ export async function restoreBackup(db, backup, origin) {
         await db.run('INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?,?,?)', k, String(v), t);
         await writeSyncEvent(db, { tbl: 'admin_config', row_uid: k, op: 'upsert', snapshot: { key: k, value: String(v), updated_at: t }, origin });
       }
+    }
+
+    // v5.0 群聊四表恢复
+    for (const m of (backup.chat_messages || [])) {
+      if (!m.uid) continue;
+      await db.run(
+        `INSERT OR REPLACE INTO chat_messages (uid, sender_key, sender_name, sender_avatar, msg_type,
+                content, attachments, reply_to, recalled, created_at, updated_at, deleted)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,0)`,
+        m.uid, m.sender_key || '', m.sender_name || '', m.sender_avatar || '', m.msg_type || 'text',
+        m.content || '', typeof m.attachments === 'string' ? m.attachments : JSON.stringify(m.attachments || []),
+        m.reply_to || '', m.recalled ? 1 : 0, m.created_at || t, t);
+      await writeSyncEvent(db, { tbl: 'chat_messages', row_uid: m.uid, op: 'upsert',
+        snapshot: { ...m, attachments: typeof m.attachments === 'string' ? JSON.parse(m.attachments || '[]') : (m.attachments || []), updated_at: t, deleted: 0 }, origin });
+    }
+    for (const r of (backup.chat_reads || [])) {
+      if (!r.member_key) continue;
+      await db.run(
+        `INSERT OR REPLACE INTO chat_reads (member_key, last_read_id, last_read_at, updated_at) VALUES (?,?,?,?)`,
+        r.member_key, r.last_read_id || 0, r.last_read_at || t, t);
+      await writeSyncEvent(db, { tbl: 'chat_reads', row_uid: r.member_key, op: 'upsert',
+        snapshot: { member_key: r.member_key, last_read_id: r.last_read_id || 0, last_read_at: r.last_read_at || t, updated_at: t }, origin });
+    }
+    for (const f of (backup.chat_favorites || [])) {
+      if (!f.member_key || !f.msg_uid) continue;
+      await db.run(
+        'INSERT OR IGNORE INTO chat_favorites (member_key, msg_uid, created_at) VALUES (?,?,?)',
+        f.member_key, f.msg_uid, f.created_at || t);
+      await writeSyncEvent(db, { tbl: 'chat_favorites', row_uid: f.member_key + ':' + f.msg_uid, op: 'upsert',
+        snapshot: { member_key: f.member_key, msg_uid: f.msg_uid, created_at: f.created_at || t }, origin });
+    }
+    for (const n of (backup.chat_notices || [])) {
+      if (!n.uid) continue;
+      await db.run(
+        'INSERT OR REPLACE INTO chat_notices (uid, content, author, created_at, updated_at, deleted) VALUES (?,?,?,?,?,0)',
+        n.uid, n.content || '', n.author || '', n.created_at || t, t);
+      await writeSyncEvent(db, { tbl: 'chat_notices', row_uid: n.uid, op: 'upsert',
+        snapshot: { ...n, updated_at: t, deleted: 0 }, origin });
     }
   });
 }

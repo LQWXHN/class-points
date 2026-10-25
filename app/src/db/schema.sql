@@ -331,3 +331,51 @@ CREATE TABLE IF NOT EXISTS feedback_messages (
   created_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fb_time ON feedback_messages(created_at);
+
+-- ============================================================
+-- v5.0 群聊（QQ 群聊 1:1，单群，无私聊）
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid          TEXT NOT NULL UNIQUE,
+  sender_key   TEXT NOT NULL,              -- 'front' | staff 用户名
+  sender_name  TEXT NOT NULL,              -- 发送时快照昵称
+  sender_avatar TEXT NOT NULL DEFAULT '',
+  msg_type     TEXT NOT NULL,              -- 'text' | 'image' | 'file'
+  content      TEXT NOT NULL DEFAULT '',   -- 文本（含表情 token）
+  attachments  TEXT NOT NULL DEFAULT '[]', -- [{name,size,type,url}]
+  reply_to     TEXT NOT NULL DEFAULT '',   -- 被引用消息 uid
+  recalled     INTEGER NOT NULL DEFAULT 0, -- 撤回=1
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL DEFAULT 0,
+  deleted      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_chat_msg_time ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_msg_reply ON chat_messages(reply_to);
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+  member_key    TEXT PRIMARY KEY,          -- 'front' | 用户名
+  last_read_id  INTEGER NOT NULL DEFAULT 0,
+  last_read_at  INTEGER NOT NULL DEFAULT 0,
+  updated_at    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS chat_favorites (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_key   TEXT NOT NULL,
+  msg_uid      TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  UNIQUE(member_key, msg_uid)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_fav_member ON chat_favorites(member_key);
+
+CREATE TABLE IF NOT EXISTS chat_notices (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid          TEXT NOT NULL UNIQUE,
+  content      TEXT NOT NULL,
+  author       TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL DEFAULT 0,
+  deleted      INTEGER NOT NULL DEFAULT 0
+);

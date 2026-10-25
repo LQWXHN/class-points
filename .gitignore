@@ -47,6 +47,9 @@ notify-desktop/
 .env.*
 *.env
 
+# QQ 表情素材（腾讯版权，仅供私有部署，不进公开仓库；由 scripts/tmp/download-qface.py 下载）
+web/assets/qq-face/
+
 # 系统
 .DS_Store
 Thumbs.db
