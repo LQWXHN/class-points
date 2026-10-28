@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>群聊 · 班级积分</title>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=86">
-<link rel="stylesheet" href="/assets/apple.css?v=86">
-<link rel="stylesheet" href="/assets/page-chat.css?v=86">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=90">
+<link rel="stylesheet" href="/assets/apple.css?v=90">
+<link rel="stylesheet" href="/assets/page-chat.css?v=90">
 </head>
 <body>
 <div class="chat-app">
@@ -16,7 +16,6 @@
       <div class="gname" id="chat-gname">群聊</div>
       <div class="gsub" id="chat-gsub"></div>
     </div>
-    <button id="chat-members" class="icon-btn" title="成员"><i class="fas fa-users"></i></button>
     <button id="chat-fav-btn" class="icon-btn" title="我的收藏"><i class="fas fa-star"></i></button>
     <button id="chat-files" class="icon-btn" title="群文件"><i class="fas fa-folder"></i></button>
     <button id="chat-search" class="icon-btn" title="搜索"><i class="fas fa-search"></i></button>
@@ -34,6 +33,7 @@
     <div class="row">
       <button id="chat-face" class="icon-btn" title="表情"><i class="fas fa-face-smile"></i></button>
       <button id="chat-img" class="icon-btn" title="图片"><i class="fas fa-image"></i></button>
+      <button id="chat-camera" class="icon-btn" title="拍照"><i class="fas fa-camera"></i></button>
       <button id="chat-file" class="icon-btn" title="文件"><i class="fas fa-paperclip"></i></button>
       <textarea id="chat-input" rows="1" placeholder="发消息…"></textarea>
       <button id="chat-send" class="btn btn-primary send-btn" title="发送"><i class="fas fa-paper-plane"></i></button>
@@ -58,9 +58,10 @@
 </div>
 
 <input type="file" id="chat-img-input" accept="image/*" hidden>
+<input type="file" id="chat-camera-input" accept="image/*" capture="environment" hidden>
 <input type="file" id="chat-file-input" hidden>
 
-<script src="/assets/common.js?v=86"></script>
-<script src="/assets/page-chat.js?v=86"></script>
+<script src="/assets/common.js?v=90"></script>
+<script src="/assets/page-chat.js?v=90"></script>
 </body>
 </html>

@@ -43,9 +43,8 @@
     favorites: new Set(),
     replyTo: null,
     faceManifest: null,
-    es: null,               // EventSource
+    customStickers: [],
     pollTimer: null,
-    usingPoll: false,
     seenImageIdx: 0,
   };
 
@@ -53,15 +52,15 @@
   const $ = id => document.getElementById(id);
   const els = {
     scroll: $('chat-scroll'), input: $('chat-input'), sendBtn: $('chat-send'),
-    faceBtn: $('chat-face'), imgBtn: $('chat-img'), fileBtn: $('chat-file'),
-    searchBtn: $('chat-search'), membersBtn: $('chat-members'), filesBtn: $('chat-files'),
+    faceBtn: $('chat-face'), cameraBtn: $('chat-camera'), imgBtn: $('chat-img'), fileBtn: $('chat-file'),
+    searchBtn: $('chat-search'), filesBtn: $('chat-files'),
     backBtn: $('chat-back'), noticeBar: $('chat-notice-bar'),
     replyBar: $('chat-reply-bar'), replyTxt: $('chat-reply-txt'), replyCancel: $('chat-reply-cancel'),
     panel: $('chat-panel'), panelTitle: $('chat-panel-title'), panelBody: $('chat-panel-body'),
     facePanel: $('chat-face-panel'), faceTabs: $('chat-face-tabs'), faceGrid: $('chat-face-grid'),
     lightbox: $('chat-lightbox'), lightboxImg: $('chat-lightbox-img'),
     groupName: $('chat-gname'), groupSub: $('chat-gsub'),
-    fileInput: $('chat-file-input'), imgInput: $('chat-img-input'),
+    fileInput: $('chat-file-input'), imgInput: $('chat-img-input'), cameraInput: $('chat-camera-input'),
   };
 
   // ---------- 工具 ----------
@@ -148,7 +147,7 @@
     } catch (e) { msgOk = false; }
     if (!ctxOk || !msgOk) showLoadError();
     renderMessages(true);
-    connectStream();
+    startPoll();
     // 草稿恢复
     const draft = localStorage.getItem(LS_DRAFT + ':' + (state.me && state.me.member_key || 'front'));
     if (draft) {
@@ -195,48 +194,44 @@
   }
 
   // ---------- 渲染消息 ----------
+  function dayLabel(ts) {
+    const d = new Date(ts);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const msgDay = new Date(d); msgDay.setHours(0,0,0,0);
+    const diff = (today - msgDay) / 86400000;
+    if (diff === 0) return '今天';
+    if (diff === 1) return '昨天';
+    const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+    let s = wd + ' ' + (d.getMonth()+1) + '月' + d.getDate() + '日';
+    if (d.getFullYear() !== today.getFullYear()) s = d.getFullYear() + '年' + s;
+    return s;
+  }
   function renderMessages(keepScroll) {
     const prevScroll = keepScroll ? els.scroll.scrollHeight - els.scroll.scrollTop : 0;
     els.scroll.innerHTML = '';
     let lastDay = '';
-    let lastTs = 0;
-    let lastSender = '';
     let pastUnread = false;
     for (let i = 0; i < state.messages.length; i++) {
       const m = state.messages[i];
-      const day = fmtDay(m.created_at);
+      const day = dayLabel(m.created_at);
       if (day !== lastDay) {
         const d = document.createElement('div');
         d.className = 'chat-day-divider'; d.textContent = day;
         els.scroll.appendChild(d);
-        lastDay = day; lastTs = 0; lastSender = '';
-      } else if (m.created_at - lastTs > 5 * 60 * 1000) {
-        const t = document.createElement('div');
-        t.className = 'chat-time-divider'; t.textContent = fmtHM(m.created_at);
-        els.scroll.appendChild(t);
+        lastDay = day;
       }
-      // 未读分割线
       if (!pastUnread && m.id > state.myLastReadId && state.myLastReadId > 0) {
         const u = document.createElement('div');
         u.className = 'chat-unread-divider'; u.textContent = '以下是未读消息';
         els.scroll.appendChild(u);
         pastUnread = true;
       }
-      // 连续同发送者：hide avatar/name（QQ 习惯）
-      const grouped = (m.sender_key === lastSender) && !m.recalled;
-      els.scroll.appendChild(renderRow(m, grouped));
-      lastTs = m.created_at; lastSender = m.sender_key;
+      els.scroll.appendChild(renderRow(m));
     }
     if (keepScroll) els.scroll.scrollTop = els.scroll.scrollHeight - prevScroll;
   }
 
-  function fmtHM(ts) {
-    const d = new Date(ts);
-    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-  }
-
-  function renderRow(m, grouped) {
-    grouped = !!grouped;
+  function renderRow(m) {
     const me = state.me ? m.sender_key === state.me.member_key : false;
     const row = document.createElement('div');
     if (m.recalled) {
@@ -244,10 +239,9 @@
       row.innerHTML = `<div class="sys">${esc(m.sender_name)} 撤回了一条消息</div>`;
       return row;
     }
-    row.className = 'chat-row' + (me ? ' me' : '') + (grouped ? ' grouped' : '');
-    const av = grouped ? '' : CP.avatarHTML(m.sender_avatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
+    row.className = 'chat-row' + (me ? ' me' : '');
+    const av = CP.avatarHTML(m.sender_avatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
     let inner = '';
-    // reply quote
     if (m.reply_to && m.reply && m.reply.sender_name && !m.reply.deleted) {
       const rqText = m.reply.msg_type === 'text' ? (m.reply.content || '') : (m.reply.msg_type === 'image' ? '[图片]' : '[文件]');
       inner += `<div class="reply-quote">${esc(m.reply.sender_name)}：${esc(rqText.slice(0,40))}</div>`;
@@ -263,18 +257,13 @@
     } else if (m.msg_type !== 'image' && m.msg_type !== 'file') {
       inner += `<div class="bubble"></div>`;
     }
-    // v5.1: 失败红点
     if (m.failed) inner += `<div class="fail-retry" title="点击重发"><i class="fas fa-exclamation-circle"></i></div>`;
-    // 已读 n/N：只在自己最后一条消息旁显示
-    const totalMembers = (state.members && state.members.length) || 3;
-    const isOwnLast = me && m.id === state.lastId;
-    const nameHtml = (me || grouped) ? '' : `<div class="name">${esc(m.sender_name)}</div>`;
     row.innerHTML = `
-      ${av}
+      <span class="chat-avatar-wrap">${av}</span>
       <div class="body">
-        ${nameHtml}
+        <div class="name">${esc(m.sender_name)}</div>
         <div class="bubble-wrap" data-uid="${esc(m.uid)}" data-created="${m.created_at}">${inner}</div>
-        ${isOwnLast ? `<div class="read-mark">${m.read_count || 0}/${totalMembers} 已读</div>` : ''}
+        <div class="msg-time">${fmtHM(m.created_at)}</div>
       </div>`;
     bindRowActions(row, m, me);
     return row;
@@ -283,7 +272,6 @@
   function bindRowActions(row, m, me) {
     const wrap = row.querySelector('.bubble-wrap');
     if (!wrap) return;
-    // v5.1: 失败点击重发
     const fr = row.querySelector('.fail-retry');
     if (fr) fr.onclick = async (e) => {
       e.stopPropagation();
@@ -305,28 +293,73 @@
         openLightbox(m.attachments[0].url);
       }
     });
-    wrap.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      showMenu(m, me, e.clientX, e.clientY);
-    });
-    // 移动端长按 500ms 弹同一菜单
-    let pressTimer = null, px = 0, py = 0;
-    wrap.addEventListener('touchstart', e => {
-      const t = e.touches[0]; px = t.clientX; py = t.clientY;
-      pressTimer = setTimeout(() => {
-        e.preventDefault();
-        showMenu(m, me, px, py);
-      }, 500);
-    }, { passive: true });
-    wrap.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
-    wrap.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
+    // 右键/长按只绑定在头像元素上
+    const avWrap = row.querySelector('.chat-avatar-wrap');
+    if (avWrap) {
+      avWrap.addEventListener('contextmenu', e => {
+        e.preventDefault(); e.stopPropagation();
+        showMenu(m, me, e.clientX, e.clientY);
+      });
+      let pressTimer = null, px = 0, py = 0;
+      avWrap.addEventListener('touchstart', e => {
+        const t = e.touches[0]; px = t.clientX; py = t.clientY;
+        pressTimer = setTimeout(() => { e.preventDefault(); showMenu(m, me, px, py); }, 500);
+      }, { passive: true });
+      avWrap.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
+      avWrap.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
+      // 前台点头像 → 资料弹窗
+      if (me && isFront) {
+        avWrap.style.cursor = 'pointer';
+        avWrap.addEventListener('click', e => { e.stopPropagation(); showFrontProfileModal(); });
+      }
+    }
+  }
+
+  function showFrontProfileModal() {
+    const me = state.me || {};
+    const box = CP.modal(`
+      <h3>我的资料</h3>
+      <div style="display:flex;align-items:center;gap:12px;margin:10px 0">
+        <span id="fp-avatar-preview">${CP.avatarHTML(me.avatar || '👦', { size: 56 })}</span>
+        <button class="btn btn-sm btn-soft" id="fp-upload"><i class="fas fa-upload"></i> 上传头像</button>
+        <input type="file" id="fp-file" accept="image/*" hidden>
+      </div>
+      <div class="form-row"><label class="form-label">昵称</label>
+        <input id="fp-name" class="form-input" value="${esc(me.name || '')}" maxlength="20"></div>
+      <div class="modal-foot">
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="ok">保存</button>
+      </div>`, { size: 'sm' });
+    let uploadedUrl = '';
+    box.querySelector('#fp-upload').onclick = () => box.querySelector('#fp-file').click();
+    box.querySelector('#fp-file').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      const fd = new FormData(); fd.append('file', f); fd.append('prefix', 'front');
+      try {
+        const r = await CP.api('/upload', { method: 'POST', body: fd });
+        uploadedUrl = r.url || '';
+        box.querySelector('#fp-avatar-preview').innerHTML = CP.avatarHTML(uploadedUrl, { size: 56 });
+      } catch (err) { CP.failToast(err, '上传失败'); }
+    };
+    box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+    box.querySelector('[data-act=ok]').onclick = async () => {
+      const name = box.querySelector('#fp-name').value.trim();
+      if (!name) return CP.toast('昵称不能为空', 'warn');
+      try {
+        await CP.api('/chat/front-profile', { method: 'POST', body: { name, avatar: uploadedUrl || me.avatar || '' } });
+        CP.closeModal(); loadContext().catch(() => {});
+        CP.toast('资料已更新', 'success');
+      } catch (e) { CP.failToast(e, '保存失败'); }
+    };
   }
 
   function showMenu(m, me, x, y) {
     closeMenu();
     const menu = document.createElement('div');
     menu.id = 'chat-ctx-menu';
+    const title = (CP.bootstrap && CP.bootstrap.ctx_menu_title) || '你想干嘛？';
     menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:60;min-width:140px;overflow:hidden`;
+    menu.innerHTML = `<div style="padding:10px 14px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)">${esc(title)}</div>`;
     const items = [];
     items.push(['复制', async () => { try { await navigator.clipboard.writeText(m.content || ''); CP.toast('已复制'); } catch {} }]);
     items.push(['回复', () => { state.replyTo = m; els.replyBar.classList.add('show'); els.replyTxt.textContent = `回复 ${m.sender_name}: ${(m.content||'').slice(0,30)}`; }]);
@@ -371,58 +404,13 @@
     }
   }
 
-  // ---------- 连接 SSE ----------
-  function connectStream() {
-    try {
-      // EventSource 不能带自定义头；staff 用 ?t=<token>，front 用 ?dt=<token>
-      let qs = '';
-      if (isStaff) { const t = CP.getAdminToken(); if (t) qs = '?t=' + encodeURIComponent(t); }
-      else { const dt = CP.getDeviceToken(); if (dt) qs = '?dt=' + encodeURIComponent(dt); }
-      const url = '/api/chat/stream' + qs;
-      state.es = new EventSource(url);
-      state.es.addEventListener('message', e => {
-        try { onIncoming(JSON.parse(e.data)); } catch {}
-      });
-      state.es.addEventListener('recall', e => {
-        try {
-          const d = JSON.parse(e.data);
-          const mm = state.messages.find(x => x.uid === d.uid);
-          if (mm) { mm.recalled = 1; renderMessages(true); }
-        } catch {}
-      });
-      state.es.addEventListener('notice', () => loadContext().catch(() => {}));
-      state.es.addEventListener('read', e => {
-        try {
-          const d = JSON.parse(e.data);
-          const mem = (state.members || []).find(m => m.member_key === d.member_key);
-          if (mem) { mem.last_read_id = d.last_read_id; mem.last_read_at = d.last_read_at; }
-          // 重算 read_count 并重渲染（不整体闪屏）
-          for (const m of state.messages) {
-            if (m.sender_key === state.me?.member_key) {
-              m.read_count = (state.members || []).filter(x => x.member_key !== m.sender_key && (x.last_read_id || 0) >= m.id).length;
-            }
-          }
-          renderMessages(true);
-        } catch {}
-      });
-      state.es.onerror = () => {
-        // SSE 断开，切轮询
-        if (!state.usingPoll) {
-          state.usingPoll = true;
-          startPoll();
-        }
-      };
-    } catch {
-      startPoll();
-    }
-  }
-
+  // ---------- 3s 轮询（v5.2 移除 SSE） ----------
   function startPoll() {
     if (state.pollTimer) return;
-    state.pollTimer = setInterval(pollNew, 5000);
+    state.pollTimer = setInterval(pollNew, 3000);
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { clearInterval(state.pollTimer); state.pollTimer = null; }
-      else if (state.usingPoll && !state.pollTimer) state.pollTimer = setInterval(pollNew, 5000);
+      else if (!state.pollTimer) state.pollTimer = setInterval(pollNew, 3000);
     });
   }
 
@@ -434,7 +422,6 @@
         for (const m of r.messages) onIncoming(m);
       }
     } catch {}
-    // SSE 断连轮询期间，公告变更也保持实时
     try {
       const nc = await CP.api('/chat/notice', { handle401: false });
       const d = (nc && nc.data) ? nc.data : nc;
@@ -562,8 +549,10 @@
       els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
     });
     els.imgBtn.onclick = () => els.imgInput.click();
+    els.cameraBtn.onclick = () => els.cameraInput.click();
     els.fileBtn.onclick = () => els.fileInput.click();
     els.imgInput.onchange = e => { if (e.target.files[0]) uploadAndSend(e.target.files[0], 'image'); e.target.value = ''; };
+    els.cameraInput.onchange = e => { if (e.target.files[0]) uploadAndSend(e.target.files[0], 'image'); e.target.value = ''; };
     els.fileInput.onchange = e => { if (e.target.files[0]) uploadAndSend(e.target.files[0], 'file'); e.target.value = ''; };
     els.replyCancel.onclick = () => { state.replyTo = null; els.replyBar.classList.remove('show'); };
     els.faceBtn.onclick = () => {
@@ -592,7 +581,6 @@
           };
         }});
     };
-    els.membersBtn.onclick = () => openPanel('成员', renderMembers);
     els.filesBtn.onclick = () => openPanel('群文件', renderFiles);
     $('chat-fav-btn') && ($('chat-fav-btn').onclick = () => openPanel('我的收藏', renderFavorites));
     els.searchBtn.onclick = () => openPanel('搜索', renderSearchPanel);
@@ -622,7 +610,7 @@
   window.closeChatPanel = () => els.panel.classList.remove('show');
   // v5.1: 点抽屉外空白关闭（保留 X 与 ESC）
   if (els.panel) {
-    const PANEL_OPENERS = ['chat-members', 'chat-files', 'chat-fav-btn', 'chat-search'];
+    const PANEL_OPENERS = ['chat-files', 'chat-fav-btn', 'chat-search'];
     document.addEventListener('click', e => {
       if (!els.panel.classList.contains('show')) return;
       if (els.panel.contains(e.target)) return;
@@ -714,17 +702,52 @@
     } catch {}
   }
 
-  // ---------- 表情面板 ----------
+  // ---------- 表情面板（v5.2: 小批量预加载 + 自定义 Tab） ----------
   let faceCur = localStorage.getItem(LS_FACE_TAB) || 'wx';
-  let faceGridBuilt = false;
+  let faceBuilt = false;
+  let facePreloaded = {};
+  async function loadCustomStickers() {
+    try {
+      const r = await CP.api('/chat/stickers', { handle401: false, noStaffToken: isFront });
+      state.customStickers = r.stickers || [];
+    } catch { state.customStickers = []; }
+  }
   function renderFaceTab(kind) {
+    if (kind === 'custom') {
+      const isStaffRole = state.me && (state.me.role === 'teacher' || state.me.role === 'super');
+      let html = state.customStickers.map(s =>
+        `<div class="fcell" data-kind="custom" data-url="${esc(s.url)}" title="${esc(s.name || '')}">
+          <img loading="lazy" src="${esc(s.url)}">
+          ${isStaffRole ? `<i class="fas fa-times stick-del" data-url="${esc(s.url)}" style="position:absolute;top:2px;right:2px;font-size:10px;color:#fff;background:rgba(0,0,0,.5);border-radius:50%;padding:2px"></i>` : ''}
+        </div>`).join('');
+      if (isStaffRole) html += `<div class="fcell stick-upload" id="stick-upload"><i class="fas fa-plus"></i></div>`;
+      els.faceGrid.innerHTML = html;
+      els.faceGrid.querySelectorAll('.fcell[data-url]').forEach(el => {
+        el.onclick = () => {
+          const url = el.dataset.url;
+          sendImageSticker(url);
+        };
+      });
+      const del = els.faceGrid.querySelectorAll('.stick-del');
+      del.forEach(el => el.onclick = async e => {
+        e.stopPropagation();
+        const url = el.dataset.url;
+        try {
+          await CP.api('/chat/stickers', { method: 'DELETE', body: { url } });
+          state.customStickers = state.customStickers.filter(s => s.url !== url);
+          renderFaceTab('custom');
+        } catch (err) { CP.failToast(err, '删除失败'); }
+      });
+      const up = els.faceGrid.querySelector('#stick-upload');
+      if (up) up.onclick = uploadCustomSticker;
+      return;
+    }
     const sec = state.faceManifest[kind === 'wx' ? 'wechat' : 'qq'];
     if (!sec) return;
     els.faceGrid.innerHTML = sec.order.map(id => {
       const f = sec.faces[id];
       const file = (f && (f.anim || f.png)) || '';
       if (!file) return '';
-      // token 用去掉方括号的 id（微信命名表情如 [gift] → gift）
       const tok = String(id).replace(/[\[\]]/g, '');
       return `<div class="fcell" data-kind="${kind}" data-id="${tok}" title="${esc(f.name || '')}"><img loading="lazy" src="/assets/qq-face/${file}"></div>`;
     }).join('');
@@ -736,28 +759,77 @@
       };
     });
   }
-  function ensureFaceGrid() {
-    if (!state.faceManifest) return;
-    // 网格首次打开时才构建，避免一进页面就拉 150 张图
-    els.faceTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.k === faceCur));
-    if (!faceGridBuilt) { renderFaceTab(faceCur); faceGridBuilt = true; }
+  async function uploadCustomSticker() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      const fd = new FormData(); fd.append('file', f); fd.append('prefix', 'stickers');
+      try {
+        const up = await CP.api('/upload', { method: 'POST', body: fd });
+        const url = up.url || '';
+        if (!url) return CP.toast('上传失败', 'error');
+        await CP.api('/chat/stickers', { method: 'POST', body: { url, name: f.name } });
+        await loadCustomStickers();
+        renderFaceTab('custom');
+        CP.toast('已添加自定义表情', 'success');
+      } catch (err) { CP.failToast(err, '添加失败'); }
+    };
+    inp.click();
   }
-  function buildFacePanel() {
+  async function sendImageSticker(url) {
+    const body = { msg_type: 'image', content: '', attachments: [{ url, name: 'sticker', size: 0, type: 'image/*' }], reply_to: state.replyTo ? state.replyTo.uid : '' };
+    try {
+      const r = await CP.api('/chat/messages', { method: 'POST', body });
+      if (!state.messages.some(x => x.id === r.message.id)) {
+        state.messages.push(r.message);
+        state.lastId = r.message.id;
+        state.myLastReadId = r.message.id;
+        renderMessages(true); scrollToBottom();
+      }
+    } catch (e) { CP.toast(e.message || '发送失败', 'error'); }
+  }
+  function ensureFaceGrid() {
+    if (!faceBuilt) return;
+    els.faceTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.k === faceCur));
+    renderFaceTab(faceCur);
+  }
+  async function buildFacePanel() {
+    await loadCustomStickers();
     if (!state.faceManifest) { els.facePanel.style.display = 'none'; return; }
     els.facePanel.style.display = '';
-    const tabs = [['wx', '经典表情'], ['qq', 'QQ 经典']];
+    const tabs = [['wx', '经典表情'], ['qq', 'QQ 经典'], ['custom', '自定义']];
     els.faceTabs.innerHTML = tabs.map(([k, label]) => `<button data-k="${k}">${label}</button>`).join('');
     els.faceTabs.querySelectorAll('button').forEach(b => {
       b.onclick = () => {
         faceCur = b.dataset.k;
         localStorage.setItem(LS_FACE_TAB, faceCur);
-        if (faceGridBuilt) {
-          els.faceTabs.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          renderFaceTab(faceCur);
-        }
+        els.faceTabs.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        renderFaceTab(faceCur);
+        gentlePreload(faceCur);
       };
     });
+    // 不做全局预加载（几百张图会占满单条隧道）。面板打开后，仅对当前 Tab 小批量慢速预加载，
+    // 其余 Tab 在切换时再加载；浏览器缓存后再次打开即一点即显。
+    facePreloaded = {};
+    faceBuilt = true;
+    els.faceTabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.k === faceCur));
+    renderFaceTab(faceCur);
+    gentlePreload(faceCur);
+  }
+  function gentlePreload(kind) {
+    if (!state.faceManifest || kind === 'custom' || facePreloaded[kind]) return;
+    facePreloaded[kind] = true;
+    const sec = state.faceManifest[kind === 'qq' ? 'qq' : 'wechat'];
+    if (!sec || !sec.faces) return;
+    const paths = Object.values(sec.faces).map(f => f.anim || f.png).filter(Boolean).map(p => '/assets/qq-face/' + p);
+    const batch = i => {
+      if (i >= paths.length) return;
+      paths.slice(i, i + 4).forEach(p => { const img = new Image(); img.src = p; });
+      setTimeout(() => batch(i + 4), 300);
+    };
+    setTimeout(() => batch(0), 800);
   }
 
   // ---------- 图片预览 ----------

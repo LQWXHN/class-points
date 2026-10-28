@@ -1199,8 +1199,6 @@
      排行榜
      ============================================================ */
   function renderRankingsPage() {
-    const showBi = currentUser.role === 'super' || appData.config.biweekly_rank_enabled === '1';
-    if (!showBi && uiState.rankTab === 'biweekly') uiState.rankTab = 'individual';
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header">
@@ -1208,7 +1206,6 @@
         <div class="segmented">
           <button data-t="individual" class="${uiState.rankTab === 'individual' ? 'active' : ''}" onclick="App.switchRankTab('individual')"><i class="fas fa-user"></i> 个人</button>
           <button data-t="group" class="${uiState.rankTab === 'group' ? 'active' : ''}" onclick="App.switchRankTab('group')"><i class="fas fa-users"></i> 小组</button>
-          ${showBi ? `<button data-t="biweekly" class="${uiState.rankTab === 'biweekly' ? 'active' : ''}" onclick="App.switchRankTab('biweekly')"><i class="fas fa-calendar-week"></i> 双周榜</button>` : ''}
           <button data-t="tier" class="${uiState.rankTab === 'tier' ? 'active' : ''}" onclick="App.switchRankTab('tier')"><i class="fas fa-crown"></i> 段位</button>
         </div>
       </div>
@@ -1219,76 +1216,11 @@
   function switchRankTab(t) {
     uiState.rankTab = t;
     document.querySelectorAll('.segmented button[data-t]').forEach(b => b.classList.toggle('active', b.dataset.t === t));
-    if (t === 'biweekly') loadBiweekly('current');
-    else renderRankPageContent();
-  }
-  async function loadBiweekly(period) {
-    uiState.biPeriod = period;
-    uiState.biShowHistory = false;
-    const c = $('rank-page-content');
-    if (c) c.innerHTML = '<div class="empty"><i class="fas fa-circle-notch fa-spin"></i><p>加载中…</p></div>';
-    try {
-      const res = await CP.api(`/rankings/biweekly?period=${encodeURIComponent(period)}`);
-      const d = (res && res.data) ? res.data : res;
-      uiState.biData = d;
-      uiState.biHistory = d.history || uiState.biHistory;
-      renderBiweekly();
-    } catch (e) {
-      if (c) c.innerHTML = '<div class="empty"><i class="fas fa-triangle-exclamation"></i><p>双周榜加载失败</p></div>';
-    }
-  }
-  function showBiweeklyHistory() { uiState.biShowHistory = true; renderBiweekly(); }
-  function renderBiweekly() {
-    const c = $('rank-page-content'); if (!c) return;
-    const d = uiState.biData;
-    const fmtD = t => { const x = new Date(Number(t)); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
-    const fmtDE = t => fmtD(Number(t) - 1);
-    if (uiState.biShowHistory && uiState.biHistory) {
-      c.innerHTML = `<div class="flex aic gap-10" style="margin-bottom:12px">
-        <button class="btn btn-soft btn-sm" onclick="App.loadBiweekly('current')"><i class="fas fa-arrow-left"></i> 返回当前榜</button>
-        <b>历史周期</b></div>
-        <div class="rank-list">` + uiState.biHistory.map(h => `
-          <div class="rank-item" style="cursor:pointer" onclick="App.loadBiweekly(${h.period_index})">
-            <div class="rk-pos"><i class="fas fa-calendar" style="font-size:14px"></i></div>
-            <div class="rk-info"><div class="rk-name">第 ${h.period_index + 1} 期</div>
-              <div class="rk-sub">${fmtD(h.period_start)} ~ ${fmtDE(h.period_end)}</div></div>
-            <div class="rk-pts"><i class="fas fa-chevron-right text-3"></i></div>
-          </div>`).join('') + `</div>`;
-      return;
-    }
-    if (!d) { c.innerHTML = '<div class="empty"><p>暂无数据</p></div>'; return; }
-    const rows = d.rows || [];
-    const curTitle = d.not_started ? '当前双周（明日开始）' : (d.is_current ? '当前双周（进行中）' : '历史周期');
-    let head = `<div class="flex aic" style="margin-bottom:10px">
-      <div><b style="font-size:14px">${curTitle}</b>
-        <div class="text-3" style="font-size:11px">${fmtD(d.period_start)} ~ ${fmtDE(d.period_end)}</div></div>
-      <span class="spacer"></span>`;
-    if (d.is_current && uiState.biHistory) head += `<button class="btn btn-soft btn-sm" onclick="App.showBiweeklyHistory()"><i class="fas fa-clock-rotate-left"></i> 历史排行</button>`;
-    head += `</div>`;
-    if (!rows.length) { c.innerHTML = head + '<div class="empty"><i class="fas fa-calendar-week"></i><p>本周期暂无积分变化</p></div>'; return; }
-    c.innerHTML = head + `<div class="rank-list">` + rows.map((r, i) => {
-      const pos = i + 1;
-      const dv = Number(r.delta_avg) || 0;
-      const up = dv >= 0;
-      const gAv = (appData.groups.find(g => g.name === r.group_name) || {}).avatar;
-      const avHTML = gAv
-        ? (CP.resolveAvatar(gAv).img
-          ? `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;overflow:hidden;flex:none;border:2px solid ${r.color || '#8e8e93'}"><img src="${CP.esc(CP.resolveAvatar(gAv).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
-          : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;flex:none;border:2px solid ${r.color || '#8e8e93'};display:flex;align-items:center;justify-content:center;font-size:14px;background:${(r.color || '#8e8e93')}1c">${CP.esc(gAv)}</div>`)
-        : `<div class="rk-av" style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${r.color || '#8e8e93'}1c;color:${r.color || '#8e8e93'};flex:none"><i class="fas fa-users"></i></div>`;
-      return `<div class="rank-item">
-        <div class="rk-pos ${pos <= 3 ? 'p' + pos : ''}">${pos}</div>
-        ${avHTML}
-        <div class="rk-info"><div class="rk-name">${CP.esc(r.group_name)}</div>
-          <div class="rk-sub">${r.member_count} 人 · 平均分 ${Number(r.avg_start).toFixed(2)} → ${Number(r.avg_end).toFixed(2)} · 总变化 ${r.total_delta}</div></div>
-        <div class="rk-pts" style="color:${up ? 'var(--green)' : 'var(--red)'}">${up ? '+' : ''}${dv.toFixed(2)}</div>
-      </div>`;
-    }).join('') + `</div>`;
+    renderRankPageContent();
   }
   function renderRankPageContent() {
     const c = $('rank-page-content'); if (!c) return;
     const type = uiState.rankTab;
-    if (type === 'biweekly') { if (uiState.biData) renderBiweekly(); else loadBiweekly('current'); return; }
     const fLeader = appData.config.avatar_frame_leaderboard === '1';
     const fTier = appData.config.avatar_frame_tier === '1';
     if (type === 'individual') {
@@ -1387,11 +1319,13 @@
      历史记录
      ============================================================ */
   function renderRecordsPage() {
+    const isSuper = currentUser.role === 'super';
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header">
         <h2 class="page-title" style="margin:0">历史记录</h2>
         <span class="spacer"></span>
+        ${isSuper ? `<button class="btn btn-warning btn-sm" onclick="App.showFabricate()"><i class="fas fa-flask"></i> 拟造加减分</button>` : ''}
         <input type="date" id="rec-start" class="form-input" style="width:150px">
         <input type="date" id="rec-end" class="form-input" style="width:150px">
         <button class="btn btn-soft" onclick="App.loadRecords()"><i class="fas fa-search"></i> 查询</button>
@@ -1400,12 +1334,56 @@
     </div>`;
     loadRecords();
   }
+  function showFabricate() {
+    const stuOpts = appData.students.map(s => `<option value="${s.id}">${CP.esc(s.name)}</option>`).join('');
+    const grpOpts = appData.groups.map(g => `<option value="${g.id}">${CP.esc(g.name)}</option>`).join('');
+    const box = CP.modal(`
+      <h3><i class="fas fa-flask" style="color:var(--orange);margin-right:7px"></i>拟造加减分</h3>
+      <p class="text-2" style="margin:0 0 12px">仅超管可见，会在记录中标记「拟造」。</p>
+      <div class="form-row"><label class="form-label">对象类型</label>
+        <select id="fb-target" class="form-select"><option value="student">学生</option><option value="group">小组</option></select></div>
+      <div class="form-row"><label class="form-label">对象</label>
+        <select id="fb-id-student" class="form-select">${stuOpts}</select>
+        <select id="fb-id-group" class="form-select" style="display:none">${grpOpts}</select></div>
+      <div class="form-row"><label class="form-label">原因</label>
+        <input id="fb-reason" class="form-input" maxlength="50" placeholder="拟造原因"></div>
+      <div class="form-row"><label class="form-label">分值（带符号）</label>
+        <input id="fb-points" type="number" class="form-input" value="1" style="text-align:center;font-weight:700"></div>
+      <div class="form-row"><label class="form-label">时间</label>
+        <input id="fb-time" type="datetime-local" class="form-input"></div>
+      <div class="modal-foot">
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="ok">提交</button>
+      </div>`, { size: 'sm' });
+    const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    box.querySelector('#fb-time').value = now.toISOString().slice(0, 16);
+    box.querySelector('#fb-target').onchange = function() {
+      box.querySelector('#fb-id-student').style.display = this.value === 'student' ? '' : 'none';
+      box.querySelector('#fb-id-group').style.display = this.value === 'group' ? '' : 'none';
+    };
+    box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+    box.querySelector('[data-act=ok]').onclick = async () => {
+      const target = box.querySelector('#fb-target').value;
+      const id = target === 'student' ? box.querySelector('#fb-id-student').value : box.querySelector('#fb-id-group').value;
+      const reason = box.querySelector('#fb-reason').value.trim();
+      const points = parseInt(box.querySelector('#fb-points').value);
+      const timeStr = box.querySelector('#fb-time').value;
+      const time = timeStr ? new Date(timeStr).getTime() : Date.now();
+      if (!reason) return CP.toast('请填写原因', 'warn');
+      if (!Number.isInteger(points) || points === 0) return CP.toast('分值需为非零整数', 'warn');
+      try {
+        await CP.api('/points/fabricate', { method: 'POST', body: { target, id: Number(id), reason, points, time } });
+        CP.closeModal(); CP.toast('拟造成功', 'success'); loadRecords();
+      } catch (e) { CP.failToast(e, '拟造失败'); }
+    };
+  }
   async function loadRecords() {
     const box = $('rec-box'); if (!box) return;
     const start = $('rec-start').value, end = $('rec-end').value;
     let q = '/records?limit=1000';
     if (start) q += '&start=' + new Date(start + 'T00:00:00').getTime();
     if (end) q += '&end=' + new Date(end + 'T23:59:59.999').getTime();
+    const isSuper = currentUser.role === 'super';
     try {
       const res = await CP.api(q);
       const list = res.data || [];
@@ -1414,7 +1392,7 @@
         <thead><tr><th>时间</th><th>学生</th><th>小组</th><th>原因</th><th>操作者</th><th style="text-align:right">积分</th></tr></thead>
         <tbody>` + list.map(r => `<tr>
           <td class="text-3 nowrap">${CP.fmtTime(r.created_at, true)}</td>
-          <td style="font-weight:600">${CP.esc(r.student_name || '-')}</td>
+          <td style="font-weight:600">${CP.esc(r.student_name || '-')}${isSuper && r.fabricated ? ' <span class="badge badge-orange" style="font-size:10px">拟造</span>' : ''}</td>
           <td class="text-3">${CP.esc(r.group_name || '未分组')}</td>
           <td>${CP.esc(r.reason || '')}</td>
           <td class="text-3" style="font-size:12px">${CP.esc(r.operator || '-')}</td>
@@ -1664,8 +1642,14 @@
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_leaderboard === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_leaderboard',this.checked)"><span class="slider"></span></label><span>个人排行榜显示头像框</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_cards === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_cards',this.checked)"><span class="slider"></span></label><span>学生卡片显示头像框</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_tier === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_tier',this.checked)"><span class="slider"></span></label><span>段位排行榜显示头像框</span></div>
-      ${isSuper ? `<div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.biweekly_rank_enabled === '1' ? 'checked' : ''} onchange="App.saveCfg('biweekly_rank_enabled',this.checked)"><span class="slider"></span></label><span>前台双周排行显示</span></div>` : ''}
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.modal_blur_enabled !== '0' ? 'checked' : ''} onchange="App.saveCfg('modal_blur_enabled',this.checked)"><span class="slider"></span></label><span>弹窗背景模糊（低配设备可关闭）</span></div>
+
+      <h3 class="sec-t mt-20">前台体验</h3>
+      <div class="form-row"><label class="form-label">右键菜单标题</label>
+        <input id="set-ctx-menu-title" class="form-input" value="${CP.esc(appData.config.ctx_menu_title || '你想干嘛？')}" placeholder="你想干嘛？"></div>
+      <div class="form-row"><label class="form-label">一言卡片链接</label>
+        <input id="set-saying-link" class="form-input" value="${CP.esc(appData.config.saying_link || 'https://uapis.cn')}" placeholder="https://uapis.cn"></div>
+      <button class="btn btn-primary" onclick="App.saveFrontUI()"><i class="fas fa-save"></i> 保存前台设置</button>
 
       <h3 class="sec-t mt-20">通知与系统</h3>
       <div class="form-row"><label class="form-label">忘记密码救援邮箱</label>
@@ -1872,6 +1856,14 @@
       system_version: $('set-system-version').value.trim(),
     };
     try { await CP.api('/config', { method: 'PUT', body }); Object.assign(appData.config, body); CP.toast('系统信息已保存', 'success'); }
+    catch (e) { CP.failToast(e, '保存失败'); }
+  }
+  async function saveFrontUI() {
+    const body = {
+      ctx_menu_title: $('set-ctx-menu-title').value.trim(),
+      saying_link: $('set-saying-link').value.trim(),
+    };
+    try { await CP.api('/config', { method: 'PUT', body }); Object.assign(appData.config, body); CP.toast('前台设置已保存', 'success'); }
     catch (e) { CP.failToast(e, '保存失败'); }
   }
   function onNotifySoundChange() {
@@ -2853,18 +2845,18 @@
     dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,
-    switchRankTab, loadBiweekly, showBiweeklyHistory,
+    switchRankTab,
     renderFmPage, readFm, delFm, setFmPeriod,
     renderSysAnnPage, toggleSysAnnExpand, showAddSysAnn, doAddSysAnn,
     showEditSysAnn, doEditSysAnn, delSysAnn, closeSysAnnModal,
     saMode, saInsertImg, toggleSysAnnActive,
     tierAddRow, tierDelRow, saveTierRules,
-    loadRecords,
+    loadRecords, showFabricate,
     exportRank, showExportRecords, doExportRecords,
     doBackupCreate, doBackupDownload, downloadBackup, restoreFromCloud, deleteBackup, showRestoreModal, doRestoreFile,
     switchBackupSide,
     doChangePwd,
-    saveSiteTitle, saveCfg, saveResendFrom, saveSysInfo, onNotifySoundChange, uploadNotifySound,
+    saveSiteTitle, saveCfg, saveResendFrom, saveSysInfo, saveFrontUI, onNotifySoundChange, uploadNotifySound,
     navClick, feedback, versionToast, avatarMenu, showProfilePop, closeAvatarPop, saveProfile,
     sitesAddRow, sitesDelRow, sitesMoveRow, saveSites, saveExtLinks,
     renderResendKeyArea, showChangeApi, doChangeApi, clearApi,

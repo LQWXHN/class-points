@@ -73,7 +73,7 @@ function tierOf(p) {
 
 /* ---------- 状态 ---------- */
 let appData = { students: [], groups: [], rules: [], announcements: [], config: {}, serverTime: 0 };
-const ui = { tab: 'students', rank: 'individual', search: '', selected: new Set(), batchMode: false, recentRecords: [], biw: { data: null, history: [], historyMode: false, period: 'current' } };
+const ui = { tab: 'students', rank: 'individual', search: '', selected: new Set(), batchMode: false, recentRecords: [] };
 let isOnline = navigator.onLine;
 
 const $ = id => document.getElementById(id);
@@ -134,19 +134,6 @@ async function refreshData() {
   renderCards();
   renderRankings();
   renderBadge();
-  loadRecentRecords();
-}
-
-async function loadRecentRecords() {
-  try {
-    const d = await CP.api('/records?limit=15');
-    let list = [];
-    if (Array.isArray(d)) list = d;
-    else if (Array.isArray(d.data)) list = d.data;
-    else if (d.data && Array.isArray(d.data.list)) list = d.data.list;
-    ui.recentRecords = list;
-    renderHistory();
-  } catch (e) { /* 轮询静默 */ }
 }
 
 /* ---------- 连接状态 ---------- */
@@ -473,103 +460,18 @@ async function doBatchPoints(type, box) {
   } catch (e) { CP.failToast(e); }
 }
 
-/* ---------- 最近操作（右栏） ---------- */
-function renderHistory() {
-  const c = $('hist-list');
-  if (!c) return;
-  if (!ui.recentRecords.length) { c.innerHTML = '<div style="text-align:center;padding:18px;color:var(--text-3);font-size:12px">暂无记录</div>'; return; }
-  c.innerHTML = ui.recentRecords.slice(0, 15).map(r => {
-    const isAdd = r.points > 0;
-    return `
-      <div class="hist-item">
-        <div class="hist-ic" style="background:${isAdd ? 'var(--green-soft)' : 'var(--red-soft)'};color:${isAdd ? 'var(--green)' : 'var(--red)'}"><i class="fas fa-${isAdd ? 'plus' : 'minus'}"></i></div>
-        <div class="hist-txt">
-          <div><span class="hist-name">${CP.esc(r.student_name)}</span> <b style="color:${isAdd ? 'var(--green)' : 'var(--red)'}">${isAdd ? '+' : ''}${r.points}</b></div>
-          <div class="text-3" style="font-size:11px">${CP.esc(r.reason || '')}</div>
-          <div class="hist-time">${CP.fmtTime(r.created_at)}</div>
-        </div>
-      </div>`;
-  }).join('');
-}
-
 /* ---------- 排行榜 ---------- */
 function switchRank(type) {
   ui.rank = type;
   $('rk-stu').classList.toggle('active', type === 'individual');
   $('rk-grp').classList.toggle('active', type === 'group');
   $('rk-tier').classList.toggle('active', type === 'tier');
-  $('rk-biw').classList.toggle('active', type === 'biweekly');
-  if (type === 'biweekly') loadBiweekly(ui.biw.period);
   renderRankings();
 }
-/* ---------- 双周榜（v4.1） ---------- */
-async function loadBiweekly(period) {
-  try {
-    const d = await CP.api('/rankings/biweekly?period=' + encodeURIComponent(period));
-    const x = (d && d.data) ? d.data : d;
-    ui.biw.data = x;
-    if (x && Array.isArray(x.history)) ui.biw.history = x.history;
-  } catch (e) { ui.biw.data = null; }
-  if (ui.rank === 'biweekly') renderRankings();
-}
-function fmtRange(ms) { return CP.fmtDate(ms).slice(5); }
-function fmtRangeEnd(ms) { return CP.fmtDate(ms - 1).slice(5); }
-function renderBiweekly(c) {
-  if (ui.biw.historyMode) {
-    // 历史周期列表
-    const h = ui.biw.history || [];
-    c.innerHTML = `<div class="biw-back"><button class="btn btn-sm" id="biw-back"><i class="fas fa-arrow-left"></i> 当前周期</button></div>` +
-      (h.length ? h.map(p => `
-        <div class="rank-item biw-item" data-biw-period="${p.period_index}">
-          <div class="rk-info" style="flex:1">
-            <div class="rk-name">${fmtRange(p.period_start)} ~ ${fmtRangeEnd(p.period_end)}</div>
-            <div class="rk-sub">第 ${p.period_index + 1} 期</div>
-          </div>
-          <i class="fas fa-chevron-right text-3"></i>
-        </div>`).join('') : '<div class="empty" style="padding:20px"><p>暂无历史周期</p></div>');
-    const back = $('biw-back'); if (back) back.onclick = () => { ui.biw.historyMode = false; loadBiweekly('current'); };
-    c.querySelectorAll('[data-biw-period]').forEach(el => el.onclick = () => {
-      ui.biw.historyMode = false;
-      loadBiweekly(Number(el.dataset.biwPeriod));
-    });
-    return;
-  }
-  const x = ui.biw.data;
-  if (!x || !Array.isArray(x.rows) || !x.rows.length) { c.innerHTML = emptyRank(); return; }
-  const rangeTxt = `${fmtRange(x.period_start)} ~ ${fmtRangeEnd(x.period_end)}`;
-  const suffix = x.not_started ? ' · 明日开始' : (x.is_current ? ' · 进行中' : '');
-  c.innerHTML = `
-    <div class="biw-head">
-      <div class="biw-range">${rangeTxt}${suffix}</div>
-      <button class="btn btn-sm btn-soft" id="biw-hist"><i class="fas fa-clock-rotate-left"></i> 历史排行</button>
-    </div>` + x.rows.map((r, i) => {
-    const pos = i + 1, posCls = pos <= 3 ? 'p' + pos : '';
-    const up = r.delta_avg >= 0;
-    const gAv = (appData.groups.find(g => g.id === r.group_id || g.name === r.group_name) || {}).avatar;
-    const avHTML = gAv
-      ? (CP.resolveAvatar(gAv).img
-        ? `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;overflow:hidden;flex:none;border:2px solid ${r.color}"><img src="${CP.esc(CP.resolveAvatar(gAv).img)}" style="width:100%;height:100%;object-fit:cover" draggable="false"></div>`
-        : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;flex:none;border:2px solid ${r.color};display:flex;align-items:center;justify-content:center;font-size:16px;background:${r.color}1a">${CP.esc(gAv)}</div>`)
-      : `<div class="rk-av" style="width:32px;height:32px;border-radius:9px;background:${r.color}1a;color:${r.color};display:flex;align-items:center;justify-content:center;flex:none"><i class="fas fa-users"></i></div>`;
-    return `
-      <div class="rank-item">
-        <div class="rk-pos ${posCls}">${pos}</div>
-        ${avHTML}
-        <div class="rk-info">
-          <div class="rk-name">${CP.esc(r.group_name)}</div>
-          <div class="rk-sub">${r.member_count} 名成员 · 平均分 ${Number(r.avg_start).toFixed(2)} → ${Number(r.avg_end).toFixed(2)}</div>
-        </div>
-        <div class="rk-pts" style="color:${up ? 'var(--green)' : 'var(--red)'}">${up ? '+' : ''}${Number(r.delta_avg).toFixed(2)}</div>
-      </div>`;
-  }).join('');
-  const bh = $('biw-hist'); if (bh) bh.onclick = () => { ui.biw.historyMode = true; renderRankings(); };
-}
-
 function renderRankings() {
   const c = $('rank-list');
   const fLeader = appData.config.avatar_frame_leaderboard === '1';
   const fTier = appData.config.avatar_frame_tier === '1';
-  if (ui.rank === 'biweekly') { renderBiweekly(c); return; }
   if (ui.rank === 'individual') {
     const sorted = appData.students.slice().sort((a, b) => (b.points || 0) - (a.points || 0));
     if (!sorted.length) { c.innerHTML = emptyRank(); return; }
@@ -750,7 +652,6 @@ function bindEvents() {
   $('rk-stu').onclick = () => switchRank('individual');
   $('rk-grp').onclick = () => switchRank('group');
   $('rk-tier').onclick = () => switchRank('tier');
-  $('rk-biw').onclick = () => switchRank('biweekly');
   $('tier-help').onclick = showTierHelp;
 
   // 卡片区委托
@@ -777,9 +678,9 @@ function bindEvents() {
   const mt0 = $('m-title'); if (mt0) mt0.textContent = CP.siteTitle;
   const mb1 = $('more-menu-btn'); if (mb1) mb1.addEventListener('click', () => CP.moreMenu(mb1));
   const mb2 = $('more-menu-btn-desktop'); if (mb2) mb2.addEventListener('click', () => CP.moreMenu(mb2));
-  // ext_links + biweekly toggle
+  // ext_links 渲染到右栏底部 + 一言卡片
   CP.loadBootstrap().then(() => {
-    const box = $('ext-links'); if (box) {
+    const box = $('ext-links-right'); if (box) {
       const L = CP.bootstrap.ext_links || {};
       const items = [
         ['后台管理', '/admin', 'fas fa-screwdriver-wrench'],
@@ -789,16 +690,20 @@ function bindEvents() {
       ];
       box.innerHTML = items.filter(i => i[1]).map(i => `<a href="${CP.esc(i[1])}" target="_blank" rel="noopener" class="icon-btn" title="${i[0]}"><i class="${i[2]}"></i></a>`).join('');
     }
-    // biweekly toggle
-    const biw = $('rk-biw');
-    if (biw) {
-      const en = CP.bootstrap.biweekly_rank_enabled;
-      if (en === '0' || en === 0) {
-        biw.style.display = 'none';
-        if (biw.classList.contains('active')) { biw.classList.remove('active'); const rs = $('rk-stu'); if (rs) rs.click(); }
-      }
-    }
+    loadSaying();
   });
+}
+
+async function loadSaying() {
+  const card = $('saying-card');
+  const txt = $('saying-text');
+  if (!card || !txt) return;
+  try {
+    const r = await CP.api('/public/saying', { handle401: false });
+    if (r && r.text) txt.textContent = r.text;
+  } catch {}
+  const link = (CP.bootstrap && CP.bootstrap.saying_link) || 'https://uapis.cn';
+  card.onclick = () => window.open(link, '_blank');
 }
 function closeSidebar() {
   $('sidebar').classList.remove('open');

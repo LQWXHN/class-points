@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { verifyUser } from './_helpers.js';
 
 function fmtTs(ms) {
   const d = new Date(Number(ms));
@@ -6,9 +7,6 @@ function fmtTs(ms) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// 迁移期初 set 记录（scripts/migrate.mjs 生成）：type='set' 且 reason='期初余额（数据迁移）'
-// 在学生可见的流水/导出里隐藏（reset 等正常 set 记录仍显示）。
-// v4.4: hidden=1（超管直改）也不在学生端显示，但双周榜计入。
 const BASELINE_HIDE = "NOT (type='set' AND reason='期初余额（数据迁移）') AND hidden=0";
 
 function range(start, end) {
@@ -48,6 +46,8 @@ export function recordsRoutes() {
 
   app.get('/records', async (c) => {
     const db = c.get('db');
+    const me = await verifyUser(c);
+    const isSuper = me && me.role === 'super';
     const limit = parseInt(c.req.query('limit') || '100');
     const offset = parseInt(c.req.query('offset') || '0');
     const { whereSql, params } = buildWhere(c.req.query());
@@ -55,7 +55,12 @@ export function recordsRoutes() {
     const rows = await db.all(sql, ...params, limit, offset);
     const totalRow = await db.get(
       `SELECT COUNT(*) AS c FROM point_records WHERE ${whereSql}`, ...params);
-    return c.json({ ok: true, data: rows, total: totalRow.c });
+    const data = rows.map(r => {
+      if (isSuper) return r;
+      const { fabricated, ...rest } = r;
+      return rest;
+    });
+    return c.json({ ok: true, data, total: totalRow.c });
   });
 
   app.get('/export/records', async (c) => {

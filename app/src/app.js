@@ -10,7 +10,6 @@ import { recordsRoutes } from './routes/records.js';
 import { announcementsRoutes } from './routes/announcements.js';
 import { systemAnnouncementsRoutes } from './routes/system-announcements.js';
 import { frontMessagesRoutes } from './routes/front-messages.js';
-import { rankingsRoutes } from './routes/rankings.js';
 import { uploadRoutes } from './routes/upload.js';
 import { backupRoutes } from './routes/backup.js';
 import { configRoutes } from './routes/config.js';
@@ -49,7 +48,6 @@ export function createApp({ db, storage, origin = 'node', syncSecret = '', peerU
   app.route('/api', announcementsRoutes());
   app.route('/api', systemAnnouncementsRoutes());
   app.route('/api', frontMessagesRoutes());
-  app.route('/api', rankingsRoutes());
   app.route('/api', uploadRoutes());
   app.route('/api', backupRoutes());
   app.route('/api', configRoutes());

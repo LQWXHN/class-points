@@ -37,7 +37,6 @@ const db = createNodeDb({ dataDir: DATA_DIR });
 const schemaSql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
 await db.execSchema(schemaSql);
 await migrateV41(db);
-await migrateV42(db);
 await migrateV44(db);
 await migrateV45(db);
 await migrateV46(db);
@@ -45,7 +44,6 @@ await migrateV47(db);
 await migrateV48(db);
 await migrateV49(db);
 await migrateV50(db);
-await migrateV51(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -57,13 +55,6 @@ async function migrateV41(db) {
   if (!names.has('category')) await db.run("ALTER TABLE announcements ADD COLUMN category TEXT NOT NULL DEFAULT '通知公告'");
   if (!names.has('edited'))   await db.run('ALTER TABLE announcements ADD COLUMN edited   INTEGER NOT NULL DEFAULT 0');
   if (!names.has('editor'))   await db.run("ALTER TABLE announcements ADD COLUMN editor    TEXT NOT NULL DEFAULT ''");
-}
-
-// v4.2 幂等迁移：双周榜锚点从 2024-01-01 改为 2026-10-01，
-// 旧锚点写入的 rank_snapshots(kind='biweekly') 纯缓存，启动时清空，由首次请求确定性重算。
-// 重复执行 DELETE 无副作用（表为空时 delete 0 行）。
-async function migrateV42(db) {
-  await db.run("DELETE FROM rank_snapshots WHERE kind='biweekly'");
 }
 
 // v4.4 幂等迁移：新列、脏数据归一、内置规则、默认配置、VAPID 密钥自动生成
@@ -108,15 +99,13 @@ async function migrateV44(db) {
   }
 }
 
-// v4.5 幂等迁移：chat_stickers 表 + 默认 config biweekly_rank_enabled='1'
+// v4.5 幂等迁移：chat_stickers 表
 async function migrateV45(db) {
   await db.run(`CREATE TABLE IF NOT EXISTS chat_stickers (
     uid TEXT PRIMARY KEY, owner_type TEXT NOT NULL, owner_id TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '', url TEXT NOT NULL, created_at INTEGER NOT NULL
   )`);
   await db.run('CREATE INDEX IF NOT EXISTS idx_stickers_owner ON chat_stickers(owner_type, owner_id)');
-  const row = await db.get('SELECT key FROM admin_config WHERE key=?', 'biweekly_rank_enabled');
-  if (!row) await setConfig(db, 'biweekly_rank_enabled', '1');
 }
 
 // v4.6 幂等迁移：chat_reads 表 + 默认 config 键
@@ -172,12 +161,8 @@ async function migrateV47(db) {
   if (!vRow) await setConfig(db, 'system_version', 'v4.7（2026-10-18）');
 }
 
-// v4.8 幂等迁移：双周榜口径改为两时点小组平均分差值（清旧缓存让新公式确定性重算）；
-// 新增"弹窗背景模糊"开关（默认开）；groups 表补 avatar 列；point_rules 补 sort_order 列。
+// v4.8 幂等迁移：弹窗背景模糊开关；groups 表补 avatar 列；point_rules 补 sort_order 列。
 async function migrateV48(db) {
-  // 旧公式写入的双周榜缓存作废（纯缓存，可随时由流水重算）
-  await db.run("DELETE FROM rank_snapshots WHERE kind='biweekly'");
-
   // 弹窗背景模糊开关：'1' 开（历史默认行为），'0' 关
   const blurRow = await db.get('SELECT key FROM admin_config WHERE key=?', 'modal_blur_enabled');
   if (!blurRow) await setConfig(db, 'modal_blur_enabled', '1');
@@ -292,19 +277,6 @@ async function migrateV50(db) {
   if (!vRow) await setConfig(db, 'system_version', 'v5.1（2026-10-25）');
 }
 
-// v5.1 幂等迁移：biweekly_snapshots 表
-async function migrateV51(db) {
-  await db.run(`CREATE TABLE IF NOT EXISTS biweekly_snapshots (
-    period_start TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    group_id TEXT NOT NULL,
-    total REAL NOT NULL,
-    member_count INTEGER NOT NULL,
-    taken_at INTEGER NOT NULL,
-    PRIMARY KEY (period_start, kind, group_id)
-  )`);
-}
-
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed
 
 const app = createApp({ db, storage, origin: 'node', syncSecret, peerUrl: peerFallback });
@@ -355,10 +327,13 @@ function serveStatic(c, fullPath) {
     '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
   }[ext] || 'application/octet-stream';
   const body = fs.readFileSync(fullPath);
-  // HTML 每次校验；静态资源短缓存 + 必须回源校验，保证发版后边缘/浏览器不滞留旧 JS/CSS
+  // HTML 每次校验；表情素材长期缓存（内容不变，保证再次打开一点即显）；其余静态资源短缓存
+  const norm = fullPath.replace(/\\/g, '/');
   const cacheControl = ext === '.html'
     ? 'no-cache'
-    : 'public, max-age=300, must-revalidate';
+    : norm.includes('/assets/qq-face/')
+      ? 'public, max-age=604800, immutable'
+      : 'public, max-age=300, must-revalidate';
   return c.body(body, 200, { 'Content-Type': mime, 'Cache-Control': cacheControl });
 }
 
@@ -403,72 +378,5 @@ async function autoBackupOnce() {
   console.log('[autoBackup] ok', meta.filename);
 }
 scheduleAutoBackup();
-
-// v5.1：每日 00:00 双周快照（锚点 2026-10-26，14 天一期）
-const BIWEEK_ANCHOR = Date.UTC(2026, 9, 26) - 8 * 3600 * 1000;
-const BIWEEK_PERIOD = 14 * 24 * 3600 * 1000;
-// 取当前所有已分组学生的小组总分与人数
-async function groupTotals() {
-  const stus = await db.all("SELECT uid, group_uid, points FROM students WHERE deleted=0 AND group_uid != ''");
-  const agg = {};
-  for (const s of stus) {
-    if (!agg[s.group_uid]) agg[s.group_uid] = { total: 0, n: 0 };
-    agg[s.group_uid].total += Number(s.points) || 0;
-    agg[s.group_uid].n++;
-  }
-  return agg;
-}
-// 幂等写入快照并发同步事件（v5.1：快照同步到 D1，备用站也能出榜）
-async function upsertSnapshot(periodStart, kind, gid, total, memberCount) {
-  const t = Date.now();
-  const row = { period_start: String(periodStart), kind, group_id: gid, total, member_count: memberCount, taken_at: t };
-  await db.run(
-    `INSERT INTO biweekly_snapshots (period_start, kind, group_id, total, member_count, taken_at)
-     VALUES (?,?,?,?,?,?)
-     ON CONFLICT(period_start, kind, group_id) DO UPDATE SET total=excluded.total, member_count=excluded.member_count, taken_at=excluded.taken_at`,
-    String(periodStart), kind, gid, total, memberCount, t
-  );
-  await writeSyncEvent(db, {
-    tbl: 'biweekly_snapshots',
-    row_uid: `${period_start}|${kind}|${gid}`,
-    op: 'upsert',
-    snapshot: row,
-  });
-}
-async function captureBiweeklySnapshot(kind, periodStartOverride) {
-  const nowD = new Date();
-  const today00 = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()).getTime();
-  const idx = Math.floor((today00 - BIWEEK_ANCHOR) / BIWEEK_PERIOD);
-  // start/end 快照都归属当天所在期首（end 快照时由调用方传入上一期期首）
-  const periodStart = periodStartOverride != null ? periodStartOverride : BIWEEK_ANCHOR + idx * BIWEEK_PERIOD;
-  const agg = await groupTotals();
-  for (const [gid, v] of Object.entries(agg)) {
-    await upsertSnapshot(periodStart, kind, gid, v.total, v.n);
-  }
-  console.log(`[biweekly-snapshot] kind=${kind} period_start=${new Date(periodStart).toISOString()} groups=${Object.keys(agg).length}`);
-}
-function scheduleBiweekly() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(0, 0, 5, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  setTimeout(() => {
-    (async () => {
-      try {
-        const nowD = new Date();
-        const today00 = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()).getTime();
-        const fromAnchor = today00 - BIWEEK_ANCHOR;
-        const mod = ((fromAnchor % BIWEEK_PERIOD) + BIWEEK_PERIOD) % BIWEEK_PERIOD;
-        // 期首日 00:00 → 当期 start 快照 + 上一期 end 快照
-        if (mod === 0) {
-          await captureBiweeklySnapshot('start', today00);
-          await captureBiweeklySnapshot('end', today00 - BIWEEK_PERIOD);
-        }
-      } catch (e) { console.error('[biweekly-snapshot]', e.message); }
-    })();
-    scheduleBiweekly();
-  }, next.getTime() - now.getTime());
-}
-scheduleBiweekly();
 
 export { db, storage, app, runner };

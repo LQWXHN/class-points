@@ -1,24 +1,11 @@
-// v5.0 群聊路由（/api/chat）：单群，front + staff(teacher/admin) 三账号
-// 鉴权：staff=Bearer；front=X-Device-Token；member_key front='front'，staff=username
-// SSE 在 node 主站内存广播；worker 端由 worker.js 反代到主站
+// v5.2 群聊路由（/api/chat）：单群，front + staff(teacher/admin) 三账号
+// 鉴权：staff=Bearer；front=X-Device-Token
 import { Hono } from 'hono';
-import { uid, now, verifyUser, verifyDevice, getConfig, writeSyncEvent } from './_helpers.js';
+import { uid, now, verifyUser, verifyDevice, getConfig, setConfig, writeSyncEvent } from './_helpers.js';
 import { pushChatMessage } from '../push/wxpusher.js';
-
-// ---------- SSE hub（node 内存；worker 端不实现 SSE，前端走轮询） ----------
-const sseClients = new Set(); // { member_key, controller, heartbeat }
-
-function sseBroadcast(event, data, excludeMemberKey = '') {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const cl of sseClients) {
-    if (cl.member_key === excludeMemberKey) continue;
-    try { cl.controller.enqueue(new TextEncoder().encode(payload)); } catch {}
-  }
-}
 
 async function authChat(c) {
   const db = c.get('db');
-  // 1) 设备 token 优先（v5.1：前台身份隔离，同浏览器登录 admin 后 /chat 仍以 front 身份发言）
   let dev = await verifyDevice(c);
   if (!dev) {
     const dt = c.req.query('dt');
@@ -32,7 +19,6 @@ async function authChat(c) {
     const wxpusher_uid = (await getConfig(db, 'wxpusher_uid_front')) || '';
     return { member_key: 'front', name, avatar, wxpusher_uid, role: 'front', is_staff: false, device: dev };
   }
-  // 2) staff Bearer
   const me = await verifyUser(c);
   if (me) {
     const row = await db.get('SELECT avatar, wxpusher_uid FROM admin_users WHERE username=? AND deleted=0', me.username);
@@ -44,25 +30,6 @@ async function authChat(c) {
       role: me.role,
       is_staff: true,
     };
-  }
-  // 3) staff query ?t=<token>（SSE 用）
-  const qt = c.req.query('t');
-  if (qt) {
-    await db.run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
-    const row = await db.get(
-      `SELECT s.username, s.role, COALESCE(a.display_name,'') AS display_name, a.avatar, a.wxpusher_uid
-       FROM sessions s LEFT JOIN admin_users a ON a.username=s.username
-       WHERE s.token=?`, qt);
-    if (row) {
-      return {
-        member_key: row.username,
-        name: row.display_name || row.username,
-        avatar: row.avatar || '',
-        wxpusher_uid: row.wxpusher_uid || '',
-        role: row.role,
-        is_staff: true,
-      };
-    }
   }
   return null;
 }
@@ -105,7 +72,6 @@ async function latestNotice(db) {
   return row || null;
 }
 
-// 构造消息返回对象（带 reply 快照 + read_count）
 async function shapeMsg(db, m, favoriteSet) {
   let reply = { deleted: 1 };
   if (m.reply_to) {
@@ -120,11 +86,6 @@ async function shapeMsg(db, m, favoriteSet) {
       };
     }
   }
-  // read_count: last_read_id >= m.id 的成员数（不含发送者自己）
-  const row = await db.get(
-    `SELECT COUNT(*) AS c FROM chat_reads WHERE member_key != ? AND last_read_id >= ?`,
-    m.sender_key, m.id
-  );
   let attachments = [];
   try { attachments = JSON.parse(m.attachments || '[]'); } catch {}
   return {
@@ -134,7 +95,6 @@ async function shapeMsg(db, m, favoriteSet) {
     reply_to: m.reply_to, reply,
     recalled: m.recalled, deleted: m.deleted,
     created_at: m.created_at, updated_at: m.updated_at,
-    read_count: (row && row.c) || 0,
     is_favorite: favoriteSet ? favoriteSet.has(m.uid) : false,
   };
 }
@@ -142,7 +102,6 @@ async function shapeMsg(db, m, favoriteSet) {
 export function chatRoutes() {
   const app = new Hono();
 
-  // 上下文：成员 + 群名 + 公告 + me + 未读起点 + 我收藏的 msg_uid 列表
   app.get('/chat/context', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -167,7 +126,6 @@ export function chatRoutes() {
     });
   });
 
-  // 历史分页：?before=<id>&limit=50；返回升序数组（id < before 的最近 limit 条）
   app.get('/chat/messages', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -185,7 +143,7 @@ export function chatRoutes() {
         'SELECT * FROM chat_messages WHERE deleted=0 ORDER BY id DESC LIMIT ?', limit
       );
     }
-    rows.reverse(); // 升序返回
+    rows.reverse();
     const favSet = new Set((await db.all(
       'SELECT msg_uid FROM chat_favorites WHERE member_key=?', me.member_key
     )).map(r => r.msg_uid));
@@ -195,7 +153,6 @@ export function chatRoutes() {
     return c.json({ ok: true, messages: shaped, members });
   });
 
-  // 增量轮询：?after=<id>；返回 id > after 的升序数组
   app.get('/chat/new', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -213,7 +170,6 @@ export function chatRoutes() {
     return c.json({ ok: true, messages: shaped });
   });
 
-  // 搜索：?q=关键字&page=1；按 content / sender_name / 文件名 LIKE
   app.get('/chat/search', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -248,7 +204,6 @@ export function chatRoutes() {
     });
   });
 
-  // 发消息：{msg_type, content, attachments, reply_to}
   app.post('/chat/messages', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -265,7 +220,6 @@ export function chatRoutes() {
         url: String(a.url || ''),
       }));
     }
-    // 单文件 ≤ 600MB（前端上传时已拦截；这里兜底）
     const LIMIT = 600 * 1024 * 1024;
     for (const a of attachments) {
       if (a.size > LIMIT) return c.json({ ok: false, error: '单个文件不能超过 600MB' }, 400);
@@ -273,7 +227,7 @@ export function chatRoutes() {
     const replyTo = String(body.reply_to || '').slice(0, 64);
     const t = now();
     const msgUid = uid();
-    const senderName = me.member_key === 'front' ? me.name : me.name;
+    const senderName = me.name;
     await db.run(
       `INSERT INTO chat_messages (uid, sender_key, sender_name, sender_avatar, msg_type, content, attachments, reply_to, recalled, created_at, updated_at, deleted)
        VALUES (?,?,?,?,?,?,?,?,0,?,?,0)`,
@@ -290,15 +244,12 @@ export function chatRoutes() {
       },
     });
     const shaped = await shapeMsg(db, row, null);
-    sseBroadcast('message', shaped, me.member_key);
-    // 推送（WxPusher）：取第一个在线公网站点作为跳转 url
     const { pickPublicOnline } = await import('../sites-health.js');
     const origin = pickPublicOnline() || (c.req.header('Origin') || (c.req.header('Referer') ? new URL(c.req.header('Referer')).origin : '')) || '';
     pushChatMessage(db, shaped, me.member_key, { origin }).catch(e => console.error('[wxpush]', e.message));
     return c.json({ ok: true, message: shaped });
   });
 
-  // 已读上报：{after_id}；upsert 自己的阅读位（front 共享一条）
   app.post('/chat/read', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -316,11 +267,9 @@ export function chatRoutes() {
       tbl: 'chat_reads', row_uid: me.member_key, op: 'upsert',
       snapshot: { member_key: me.member_key, last_read_id: afterId, last_read_at: t, updated_at: t },
     });
-    sseBroadcast('read', { member_key: me.member_key, name: me.name, last_read_id: afterId, last_read_at: t });
     return c.json({ ok: true });
   });
 
-  // 撤回：本人 2 分钟内；staff 不限
   app.post('/chat/messages/:uid/recall', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -340,11 +289,9 @@ export function chatRoutes() {
       tbl: 'chat_messages', row_uid: msgUid, op: 'upsert',
       snapshot: { ...row, recalled: 1, updated_at: t },
     });
-    sseBroadcast('recall', { uid: msgUid, recalled: 1 });
     return c.json({ ok: true });
   });
 
-  // 收藏：GET 列表 / POST 添加 / DELETE 取消（按 member_key 隔离）
   app.get('/chat/favorites', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -382,7 +329,6 @@ export function chatRoutes() {
     return c.json({ ok: true });
   });
 
-  // 群公告：GET 最新一条；POST 仅 staff
   app.get('/chat/notice', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -409,8 +355,6 @@ export function chatRoutes() {
       tbl: 'chat_notices', row_uid: nUid, op: 'upsert',
       snapshot: { uid: nUid, content, author: me.name, created_at: t, updated_at: t, deleted: 0 },
     });
-    sseBroadcast('notice', { uid: nUid, content, author: me.name, created_at: t });
-    // WxPusher 推送（公告变更）
     const { pickPublicOnline } = await import('../sites-health.js');
     const origin = pickPublicOnline() || (c.req.header('Origin') || '');
     const { pushNotice } = await import('../push/wxpusher.js');
@@ -418,7 +362,6 @@ export function chatRoutes() {
     return c.json({ ok: true, notice: { uid: nUid, content, author: me.name, created_at: t } });
   });
 
-  // v5.1：站点健康（super）
   app.get('/admin/sites-health', async (c) => {
     const me = await verifyUser(c);
     if (!me || me.role !== 'super') return c.json({ ok: false, error: '需要超管权限' }, 403);
@@ -426,7 +369,6 @@ export function chatRoutes() {
     return c.json({ ok: true, health: getSiteHealth() });
   });
 
-  // 未读数：last_read_id < 最大消息 id 的数量
   app.get('/chat/unread-count', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -439,7 +381,6 @@ export function chatRoutes() {
       'SELECT COUNT(*) AS c FROM chat_messages WHERE id > ? AND deleted=0 AND sender_key != ?',
       lrid, me.member_key
     );
-    // v5.1: 返回最新一条消息预览（角标用）
     const lastMsg = await db.get(
       "SELECT sender_name, msg_type, content, attachments, recalled FROM chat_messages WHERE deleted=0 ORDER BY id DESC LIMIT 1"
     );
@@ -459,7 +400,6 @@ export function chatRoutes() {
     return c.json({ ok: true, count: (cnt && cnt.c) || 0, last_id: mid, preview, last_sender: (lastMsg && lastMsg.sender_name) || '' });
   });
 
-  // 群文件：msg_type=file AND recalled=0 AND deleted=0
   app.get('/chat/files', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
@@ -481,37 +421,54 @@ export function chatRoutes() {
     return c.json({ ok: true, files });
   });
 
-  // SSE 流（仅 node 主站；worker 端由 worker.js 反代到主站）
-  app.get('/chat/stream', async (c) => {
+  // v5.2: 前台资料编辑（设备 token 鉴权）
+  app.post('/chat/front-profile', async (c) => {
     const me = await authChat(c);
-    if (!me) return c.json({ ok: false, error: '未登录' }, 401);
-    const body = new ReadableStream({
-      start(controller) {
-        const enc = new TextEncoder();
-        controller.enqueue(enc.encode(`event: hello\ndata: ${JSON.stringify({ ok: true, member_key: me.member_key })}\n\n`));
-        const cl = { member_key: me.member_key, controller };
-        sseClients.add(cl);
-        const hb = setInterval(() => {
-          try { controller.enqueue(enc.encode(`event: ping\ndata: {}\n\n`)); } catch {}
-        }, 25000);
-        cl.hb = hb;
-      },
-      cancel() {
-        for (const cl of sseClients) {
-          if (cl.controller === controller) {
-            if (cl.hb) clearInterval(cl.hb);
-            sseClients.delete(cl);
-          }
-        }
-      },
-    });
-    return new Response(body, {
-      headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    if (!me || me.member_key !== 'front') return c.json({ ok: false, error: '需要前台设备登录' }, 401);
+    const db = c.get('db');
+    const body = await c.req.json().catch(() => ({}));
+    const name = String(body.name || '').slice(0, 50);
+    const avatar = String(body.avatar || '').slice(0, 500);
+    if (name) await setConfig(db, 'front_account_name', name);
+    if (avatar) await setConfig(db, 'front_account_avatar', avatar);
+    return c.json({ ok: true, name: name || (await getConfig(db, 'front_account_name')), avatar: avatar || (await getConfig(db, 'front_account_avatar')) });
+  });
+
+  // v5.2: 自定义表情包
+  app.get('/chat/stickers', async (c) => {
+    const db = c.get('db');
+    const raw = await getConfig(db, 'custom_stickers');
+    let list = [];
+    try { list = JSON.parse(raw || '[]'); } catch {}
+    return c.json({ ok: true, stickers: list });
+  });
+  app.post('/chat/stickers', async (c) => {
+    const me = await verifyUser(c);
+    if (!me || (me.role !== 'teacher' && me.role !== 'super')) return c.json({ ok: false, error: '仅老师可添加' }, 403);
+    const db = c.get('db');
+    const body = await c.req.json().catch(() => ({}));
+    const url = String(body.url || '').slice(0, 500);
+    const name = String(body.name || '').slice(0, 50);
+    if (!url) return c.json({ ok: false, error: '缺少 url' }, 400);
+    const raw = await getConfig(db, 'custom_stickers');
+    let list = [];
+    try { list = JSON.parse(raw || '[]'); } catch {}
+    list.push({ url, name: name || url });
+    await setConfig(db, 'custom_stickers', JSON.stringify(list));
+    return c.json({ ok: true, stickers: list });
+  });
+  app.delete('/chat/stickers', async (c) => {
+    const me = await verifyUser(c);
+    if (!me || (me.role !== 'teacher' && me.role !== 'super')) return c.json({ ok: false, error: '仅老师可删除' }, 403);
+    const db = c.get('db');
+    const body = await c.req.json().catch(() => ({}));
+    const url = String(body.url || '');
+    const raw = await getConfig(db, 'custom_stickers');
+    let list = [];
+    try { list = JSON.parse(raw || '[]'); } catch {}
+    list = list.filter(s => s.url !== url);
+    await setConfig(db, 'custom_stickers', JSON.stringify(list));
+    return c.json({ ok: true, stickers: list });
   });
 
   return app;

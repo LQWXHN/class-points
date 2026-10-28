@@ -523,7 +523,7 @@
   CP.bootstrap = {
     sites: [{ name: '主站', url: 'https://points.example.com' }, { name: '备用站', url: 'https://points1.example.com' }],
     ext_links: {}, system_version: '', notify_sound: 'ganlu', notify_sound_url: '',
-    biweekly_rank_enabled: '1', modal_blur_enabled: '1'
+    ctx_menu_title: '你想干嘛？', saying_link: 'https://uapis.cn', custom_stickers: [], modal_blur_enabled: '1'
   };
   // 弹窗背景模糊开关：在 <html> 上切换 class，CSS 见 apple.css（:root.modal-blur-off）
   CP.applyModalBlur = function () {
@@ -538,7 +538,9 @@
       if (d.system_version) CP.bootstrap.system_version = d.system_version;
       if (d.notify_sound) CP.bootstrap.notify_sound = d.notify_sound;
       if (d.notify_sound_url) CP.bootstrap.notify_sound_url = d.notify_sound_url;
-      if (d.biweekly_rank_enabled !== undefined) CP.bootstrap.biweekly_rank_enabled = d.biweekly_rank_enabled;
+      if (d.ctx_menu_title !== undefined) CP.bootstrap.ctx_menu_title = d.ctx_menu_title;
+      if (d.saying_link !== undefined) CP.bootstrap.saying_link = d.saying_link;
+      if (Array.isArray(d.custom_stickers)) CP.bootstrap.custom_stickers = d.custom_stickers;
       if (d.modal_blur_enabled !== undefined) CP.bootstrap.modal_blur_enabled = d.modal_blur_enabled;
       CP.applyModalBlur();
     } catch (e) { /* 静默 */ }
@@ -737,10 +739,9 @@
   };
 
   /* ---------- 群聊未读角标（v5.0） ---------- */
-  // v5.1：后台路径一律 staff 身份，前台路径一律设备身份，避免同浏览器双 token 串号
+  // v5.2: 移除全局 SSE，保留未读轮询 + 公告轮询
   const isStaffPage = () => /^\/(admin|chat-staff|chat\/teacher|chat\/admin)/.test(location.pathname);
   CP.pollChatUnread = function (onUpdate) {
-    // v5.1: 10s 轮询，页面隐藏时跳过
     let lastCount = -1;
     async function tick() {
       if (document.hidden) return;
@@ -758,58 +759,13 @@
     setInterval(tick, 10000);
   };
 
-  // v5.1: 全局轻量 EventSource（非聊天页才连）
-  CP.startGlobalChatSSE = function (onMessage, onRead, onNotice) {
-    if (/^\/chat/.test(location.pathname)) return; // 聊天页自己有 SSE
-    let es = null, retryTimer = null, closed = false;
-    function staffPageNow() { return isStaffPage(); }
-    function connect() {
-      if (closed || document.hidden) return;
-      const t = CP.getAdminToken();
-      const dt = CP.getDeviceToken();
-      const staffPage = staffPageNow();
-      const token = staffPage ? t : dt;
-      if (!token) { retryTimer = setTimeout(connect, 15000); return; }
-      try {
-        const qs = staffPage ? '?t=' + encodeURIComponent(token) : '?dt=' + encodeURIComponent(token);
-        es = new EventSource('/api/chat/stream' + qs);
-        es.addEventListener('message', e => { try { onMessage && onMessage(JSON.parse(e.data)); } catch {} });
-        es.addEventListener('read', e => { try { onRead && onRead(JSON.parse(e.data)); } catch {} });
-        es.addEventListener('notice', e => {
-          try {
-            const n = JSON.parse(e.data);
-            if (onNotice) onNotice(n);
-            else if (n && n.content) CP.toast('📢 群公告：' + n.content, 'info', 4000);
-          } catch {}
-        });
-        es.onerror = () => {
-          try { es.close(); } catch {}
-          clearTimeout(retryTimer);
-          retryTimer = setTimeout(connect, 15000); // 弱网/抖动后自动重连
-        };
-      } catch {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(connect, 15000);
-      }
-    }
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        closed = true;
-        clearTimeout(retryTimer);
-        try { es && es.close(); } catch {}
-      } else {
-        closed = false;
-        clearTimeout(retryTimer);
-        connect();
-      }
-    });
-    connect();
-    // 公告轮询兜底：SSE 完全不可用时，公告变更最迟 60s 内也能收到提醒
+  // v5.2: 独立公告轮询（首次 3s 基线，之后 60s，uid 变化弹 toast）
+  CP.pollChatNotice = function (onNotice) {
     let lastNoticeUid = null;
-    async function pollNotice() {
+    async function tick() {
       if (document.hidden) return;
       try {
-        const opts = staffPageNow() ? { noDeviceToken: true, handle401: false }
+        const opts = isStaffPage() ? { noDeviceToken: true, handle401: false }
                                     : { noStaffToken: true, handle401: false };
         const nc = await CP.api('/chat/notice', opts);
         const d = (nc && nc.data) ? nc.data : nc;
@@ -823,8 +779,8 @@
         }
       } catch {}
     }
-    setTimeout(pollNotice, 3000);
-    setInterval(pollNotice, 60000);
+    setTimeout(tick, 3000);
+    setInterval(tick, 60000);
   };
 
   /* ---------- SW 注册（离线外壳缓存） ---------- */

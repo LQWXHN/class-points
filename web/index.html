@@ -7,9 +7,9 @@
 <title>班级积分系统</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=86">
-<link rel="stylesheet" href="/assets/apple.css?v=86">
-<link rel="stylesheet" href="/assets/page-index.css?v=86">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=90">
+<link rel="stylesheet" href="/assets/apple.css?v=90">
+<link rel="stylesheet" href="/assets/page-index.css?v=90">
 </head>
 <body>
 
@@ -64,7 +64,6 @@
     </div>
     <div class="conn-status">
       <span id="conn-dot" class="dot-on"></span><span id="conn-text">已连接</span>
-      <div id="ext-links" class="ext-links"></div>
     </div>
   </aside>
 
@@ -135,20 +134,21 @@
         <button id="rk-stu" class="active" style="flex:1"><i class="fas fa-user"></i> 个人</button>
         <button id="rk-grp" style="flex:1"><i class="fas fa-users"></i> 小组</button>
         <button id="rk-tier" style="flex:1"><i class="fas fa-crown"></i> 段位</button>
-        <button id="rk-biw" style="flex:1"><i class="fas fa-calendar-week"></i> 双周</button>
       </div>
       <div id="rank-list" class="rank-list"></div>
 
-      <div class="hist-section">
-        <div class="hist-head"><i class="fas fa-history"></i> 最近操作</div>
-        <div id="hist-list" class="hist-list"></div>
+      <div id="saying-card" class="saying-card" style="cursor:pointer">
+        <div class="saying-body" id="saying-text"></div>
+        <div class="saying-more">……点击查看更多信息</div>
       </div>
+
+      <div id="ext-links-right" class="ext-links"></div>
     </div>
   </aside>
 </div>
 
-<script src="/assets/common.js?v=86"></script>
-<script src="/assets/page-index.js?v=86"></script>
+<script src="/assets/common.js?v=90"></script>
+<script src="/assets/page-index.js?v=90"></script>
 <script>
 // v5.1: 群聊未读角标 + 预览
 async function refreshNavChat() {

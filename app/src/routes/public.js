@@ -17,7 +17,6 @@ export function publicRoutes() {
     const version = await getConfig(db, 'system_version') || '';
     const sound = await getConfig(db, 'notify_sound') || 'ganlu';
     const soundUrl = await getConfig(db, 'notify_sound_url') || '';
-    const biweeklyEnabled = await getConfig(db, 'biweekly_rank_enabled') || '1';
     const modalBlurEnabled = await getConfig(db, 'modal_blur_enabled') || '1';
     let sitesArr = [], extObj = {};
     try { sitesArr = JSON.parse(sites); } catch {}
@@ -29,10 +28,36 @@ export function publicRoutes() {
       system_version: version,
       notify_sound: sound,
       notify_sound_url: soundUrl,
-      biweekly_rank_enabled: biweeklyEnabled,
       modal_blur_enabled: modalBlurEnabled,
       instance: c.get('origin') === 'worker' ? 'worker' : 'node',
     });
+  });
+
+  // v5.2: GET /public/saying — 每日一言（按自然日缓存）
+  let sayingCache = { date: '', text: '' };
+  app.get('/public/saying', async (c) => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (sayingCache.date === today && sayingCache.text) {
+      return c.json({ ok: true, text: sayingCache.text });
+    }
+    try {
+      const token = (c.env && c.env.UAPI_SAYING_TOKEN) || process.env.UAPI_SAYING_TOKEN || '';
+      const resp = await fetch('https://uapis.cn/api/v1/saying', token ? {
+        headers: { 'Authorization': 'Bearer ' + token },
+      } : {});
+      if (resp.ok) {
+        const data = await resp.json();
+        const text = data.text || data.data?.text || '';
+        if (text) {
+          sayingCache = { date: today, text };
+          return c.json({ ok: true, text });
+        }
+      }
+    } catch {}
+    // 回退固定文案
+    const fallback = '千里之行，始于足下。';
+    sayingCache = { date: today, text: fallback };
+    return c.json({ ok: true, text: fallback });
   });
 
   // GET /storage/usage — staff

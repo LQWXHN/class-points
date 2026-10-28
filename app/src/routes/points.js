@@ -110,5 +110,67 @@ export function pointsRoutes() {
     return c.json({ ok: true });
   });
 
+  // v5.2: POST /points/fabricate — 仅 super，拟造加减分
+  app.post('/points/fabricate', async (c) => {
+    const me = await verifyUser(c);
+    if (!me || me.role !== 'super') return c.json({ ok: false, error: '需要超管权限' }, 403);
+    const db = c.get('db');
+    const body = await c.req.json().catch(() => ({}));
+    const target = String(body.target || '');
+    const id = String(body.id || '');
+    const reason = String(body.reason || '').slice(0, 200);
+    const points = parseInt(body.points) || 0;
+    const time = Number(body.time) || now();
+    if (!target || !id || !reason || points === 0) {
+      return c.json({ ok: false, error: '缺少必填参数' }, 400);
+    }
+    const type = points > 0 ? 'add' : 'sub';
+    const absPoints = Math.abs(points);
+
+    let students = [];
+    if (target === 'student') {
+      const s = await db.get('SELECT * FROM students WHERE uid=? AND deleted=0', id);
+      if (!s) return c.json({ ok: false, error: '学生不存在' }, 404);
+      students = [s];
+    } else if (target === 'group') {
+      students = await db.all('SELECT * FROM students WHERE group_uid=? AND deleted=0', id);
+      if (!students.length) return c.json({ ok: false, error: '小组无成员' }, 404);
+    } else {
+      return c.json({ ok: false, error: 'target 必须是 student 或 group' }, 400);
+    }
+
+    const results = [];
+    for (const s of students) {
+      const groupNameRow = await db.get('SELECT name FROM groups WHERE uid=?', s.group_uid);
+      const groupName = groupNameRow ? groupNameRow.name : '';
+      const newPoints = Number(s.points || 0) + points;
+      await db.run('UPDATE students SET points=?, updated_at=? WHERE id=?', newPoints, time, s.id);
+      const studentSnap = {
+        uid: s.uid, name: s.name, student_no: s.student_no,
+        group_id: s.group_id, group_uid: s.group_uid,
+        points: newPoints, avatar: s.avatar,
+        created_at: s.created_at, updated_at: time, deleted: 0,
+      };
+      await writeSyncEvent(db, { tbl: 'students', row_uid: s.uid, op: 'upsert', snapshot: studentSnap, origin: ORIGIN(c) });
+
+      const recUid = uid();
+      const recSnap = {
+        uid: recUid, student_id: s.id, student_uid: s.uid,
+        student_name: s.name, group_name: groupName,
+        type, reason, points: absPoints,
+        operator: me.username, apply: 1, hidden: 0,
+        created_at: time, fabricated: 1,
+      };
+      await db.run(
+        `INSERT INTO point_records (uid, student_id, student_uid, student_name, group_name, type, reason, points, operator, apply, hidden, created_at, fabricated)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        recUid, s.id, s.uid, s.name, groupName, type, reason, absPoints,
+        me.username, 1, 0, time, 1);
+      await writeSyncEvent(db, { tbl: 'point_records', row_uid: recUid, op: 'upsert', snapshot: recSnap, apply_delta: 1, origin: ORIGIN(c) });
+      results.push({ student_uid: s.uid, student_name: s.name, new_points: newPoints });
+    }
+    return c.json({ ok: true, count: results.length, results });
+  });
+
   return app;
 }

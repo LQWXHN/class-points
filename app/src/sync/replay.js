@@ -438,11 +438,11 @@ export async function replayEvent(db, ev) {
     const sid = sidRow ? sidRow.id : null;
     const t = snap.created_at || Date.now();
     await db.run(
-      `INSERT INTO point_records (uid, student_id, student_uid, student_name, group_name, type, reason, points, operator, apply, hidden, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO point_records (uid, student_id, student_uid, student_name, group_name, type, reason, points, operator, apply, hidden, created_at, fabricated)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       snap.uid, sid, snap.student_uid, snap.student_name || '', snap.group_name || '',
       snap.type || 'add', snap.reason || '', snap.points || 0, snap.operator || '', 1,
-      snap.hidden ? 1 : 0, t);
+      snap.hidden ? 1 : 0, t, snap.fabricated ? 1 : 0);
     if (ev.apply_delta === 1 && sid) {
       const stu = await db.get('SELECT points FROM students WHERE id=?', sid);
       if (stu) {
@@ -453,19 +453,6 @@ export async function replayEvent(db, ev) {
         await db.run('UPDATE students SET points=?, updated_at=? WHERE id=?', next, t, sid);
       }
     }
-    return;
-  }
-
-  // v5.1 biweekly_snapshots：复合主键（period_start, kind, group_id），整行替换
-  if (tbl === 'biweekly_snapshots') {
-    const snap = parseSnap(ev.snapshot);
-    if (!snap || snap.period_start == null || !snap.kind || !snap.group_id) return;
-    await db.run(
-      `INSERT INTO biweekly_snapshots (period_start, kind, group_id, total, member_count, taken_at)
-       VALUES (?,?,?,?,?,?)
-       ON CONFLICT(period_start, kind, group_id) DO UPDATE SET total=excluded.total, member_count=excluded.member_count, taken_at=excluded.taken_at`,
-      String(snap.period_start), snap.kind, snap.group_id,
-      Number(snap.total) || 0, snap.member_count || 0, snap.taken_at || Date.now());
     return;
   }
 
