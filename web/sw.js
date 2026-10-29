@@ -1,5 +1,5 @@
 /* 班级积分系统 Service Worker：离线外壳缓存 + 一键极速预载（手动预缓存，分批下载） */
-const VERSION = 'cp-v93';
+const VERSION = 'cp-v94';
 const SHELL_CACHE = 'cp-shell-' + VERSION;
 const PRELOAD_CACHE = 'cp-preload'; // 预载缓存固定命名，跨版本保留（表情等静态资源不随更新重下）
 const SHELL = [
