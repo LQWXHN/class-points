@@ -200,6 +200,9 @@ select.form-input, select.form-select { appearance: none; -webkit-appearance: no
   display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg);
   animation: cp-pop .3s cubic-bezier(.22,1,.36,1); }
 .rel-wrap { position: relative; display: inline-flex; }
+#chat-unread-badge { margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 99px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; }
 
 /* 站点切换 popover */
 .site-switch-back { position: fixed; inset: 0; z-index: 1200; }

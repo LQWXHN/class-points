@@ -304,7 +304,11 @@
     $('nav-scroll').innerHTML = html;
   }
   function navClick(page, isExt) {
-    if (page === 'records') { location.href = '/history?from=admin'; return; }
+    if (page === 'records') {
+      // 超管进入后台历史记录页（含拟造加减分、拟造角标）；其余角色沿用前台统一记录页
+      if (currentUser.role === 'super') { switchPage('records'); return; }
+      location.href = '/history?from=admin'; return;
+    }
     if (page === 'chat') { location.href = (currentUser.role === 'super') ? '/chat/admin' : '/chat/teacher'; return; }
     switchPage(page);
   }
@@ -1628,11 +1632,7 @@
     <div class="card page-card fade-in">
       <div class="page-header"><h2 class="page-title" style="margin:0">系统设置</h2></div>
 
-      <h3 class="sec-t">极速预载</h3>
-      <p class="text-3" style="font-size:12px;margin:0 0 10px">把网页资源提前下载到本机，之后打开秒开、弱网也流畅。</p>
-      <button class="btn btn-primary" style="margin-bottom:4px" onclick="CP.openPreloadStation()"><i class="fas fa-gauge-high"></i> 打开极速预载</button>
-
-      <h3 class="sec-t mt-20">班级信息</h3>
+      <h3 class="sec-t">班级信息</h3>
       <div class="form-row"><label class="form-label">网站标题</label>
         <input id="set-sitetitle" class="form-input" value="${CP.esc(appData.config.site_title || '班级积分系统')}"></div>
       <button class="btn btn-primary" onclick="App.saveSiteTitle()"><i class="fas fa-save"></i> 保存</button>

@@ -291,26 +291,33 @@
         openLightbox(m.attachments[0].url);
       }
     });
-    // 右键/长按只绑定在头像元素上
+    // 右键/长按弹菜单（头像 + 气泡都可触发）
     const avWrap = row.querySelector('.chat-avatar-wrap');
     if (avWrap) {
-      avWrap.addEventListener('contextmenu', e => {
-        e.preventDefault(); e.stopPropagation();
-        showMenu(m, me, e.clientX, e.clientY);
-      });
-      let pressTimer = null, px = 0, py = 0;
-      avWrap.addEventListener('touchstart', e => {
-        const t = e.touches[0]; px = t.clientX; py = t.clientY;
-        pressTimer = setTimeout(() => { e.preventDefault(); showMenu(m, me, px, py); }, 500);
-      }, { passive: true });
-      avWrap.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
-      avWrap.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
+      bindBubbleMenu(avWrap, m, me);
       // 前台点头像 → 资料弹窗
       if (me && isFront) {
         avWrap.style.cursor = 'pointer';
         avWrap.addEventListener('click', e => { e.stopPropagation(); showFrontProfileModal(); });
       }
     }
+    const bubbleWrap = row.querySelector('.bubble-wrap');
+    if (bubbleWrap) bindBubbleMenu(bubbleWrap, m, me);
+  }
+
+  // 给元素绑定右键菜单 + 长按菜单（移动端）
+  function bindBubbleMenu(el, m, me) {
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault(); e.stopPropagation();
+      showMenu(m, me, e.clientX, e.clientY);
+    });
+    let pressTimer = null, px = 0, py = 0, moved = false;
+    el.addEventListener('touchstart', e => {
+      const t = e.touches[0]; px = t.clientX; py = t.clientY; moved = false;
+      pressTimer = setTimeout(() => { if (!moved) { e.preventDefault(); showMenu(m, me, px, py); } }, 500);
+    }, { passive: true });
+    el.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
+    el.addEventListener('touchmove', () => { moved = true; if (pressTimer) clearTimeout(pressTimer); });
   }
 
   function showFrontProfileModal() {
