@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>群聊 · 班级积分</title>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=90">
-<link rel="stylesheet" href="/assets/apple.css?v=90">
-<link rel="stylesheet" href="/assets/page-chat.css?v=90">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=93">
+<link rel="stylesheet" href="/assets/apple.css?v=93">
+<link rel="stylesheet" href="/assets/page-chat.css?v=93">
 </head>
 <body>
 <div class="chat-app">
@@ -35,7 +35,7 @@
       <button id="chat-img" class="icon-btn" title="图片"><i class="fas fa-image"></i></button>
       <button id="chat-camera" class="icon-btn" title="拍照"><i class="fas fa-camera"></i></button>
       <button id="chat-file" class="icon-btn" title="文件"><i class="fas fa-paperclip"></i></button>
-      <textarea id="chat-input" rows="1" placeholder="发消息…"></textarea>
+      <div id="chat-input" class="input-box" contenteditable="true" data-placeholder="发消息…"></div>
       <button id="chat-send" class="btn btn-primary send-btn" title="发送"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>
@@ -61,7 +61,7 @@
 <input type="file" id="chat-camera-input" accept="image/*" capture="environment" hidden>
 <input type="file" id="chat-file-input" hidden>
 
-<script src="/assets/common.js?v=90"></script>
-<script src="/assets/page-chat.js?v=90"></script>
+<script src="/assets/common.js?v=93"></script>
+<script src="/assets/page-chat.js?v=93"></script>
 </body>
 </html>

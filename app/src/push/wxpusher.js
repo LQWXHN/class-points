@@ -15,20 +15,20 @@ function memberUrl(origin, member) {
   return origin + '/chat';
 }
 
-function enqueuePush(member, text, url, summaryOverride) {
+function enqueuePush(member, html, url, summaryOverride) {
   const existing = pending.get(member.uid);
   if (existing) {
-    existing.textParts.push(text);
+    existing.textParts.push(html);
     if (url) existing.url = url;
     return;
   }
-  const buf = { uid: member.uid, textParts: [text], atMs: Date.now(), url: url || '', summaryOverride: summaryOverride || '' };
+  const buf = { uid: member.uid, textParts: [html], atMs: Date.now(), url: url || '', summaryOverride: summaryOverride || '' };
   pending.set(member.uid, buf);
   setTimeout(() => {
     pending.delete(member.uid);
     const multi = buf.textParts.length > 1;
     const summary = multi ? '【班级积分系统】' + buf.textParts.length + ' 条新消息' : (buf.summaryOverride || '【班级积分系统】新消息');
-    sendWxMessageRaw(buf.uid, buf.textParts.join('\n'), buf.url, summary).catch(() => {});
+    sendWxMessageRaw(buf.uid, buf.textParts.join('<br>'), buf.url, summary).catch(() => {});
   }, 30 * 1000);
 }
 
@@ -38,7 +38,7 @@ async function sendWxMessageRaw(uid, content, url, summary) {
   try {
     const body = {
       appToken,
-      content_type: 1,
+      content_type: 2,
       uids: [uid],
       content,
       summary: summary || '【班级积分系统】新消息',
@@ -53,6 +53,42 @@ async function sendWxMessageRaw(uid, content, url, summary) {
   } catch (e) { console.error('[wxpusher send]', e.message); }
 }
 
+// 表情代号 → HTML 小图（按公网 manifest 解析，缓存到内存）
+let faceMap = null;
+async function loadFaceMap(origin) {
+  if (faceMap) return faceMap;
+  if (globalThis.__FACE_MAP__) { faceMap = globalThis.__FACE_MAP__; return faceMap; }
+  if (!origin) return null;
+  try {
+    const r = await fetch(origin + '/assets/qq-face/face-manifest.json');
+    const mf = await r.json();
+    const build = sec => {
+      const o = {};
+      for (const id of (sec.order || [])) {
+        const f = sec.faces[id];
+        o[id] = f ? (f.anim || f.png) : '';
+      }
+      return o;
+    };
+    faceMap = { wx: mf.wechat ? build(mf.wechat) : {}, qq: mf.qq ? build(mf.qq) : {} };
+  } catch { faceMap = null; }
+  return faceMap;
+}
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+async function contentToHtml(text, origin) {
+  const map = await loadFaceMap(origin);
+  return escapeHtml(text).replace(/\[face:(wx|qq):([^\]]+)\]/g, (_, kind, id) => {
+    const p = map && map[kind] && map[kind][id];
+    if (!p) return '[表情]';
+    return `<img src="${origin}/assets/qq-face/${p}" style="width:24px;height:24px;vertical-align:-6px;object-fit:contain">`;
+  }).replace(/\n/g, '<br>');
+}
+function plainText(text) {
+  return String(text).replace(/\[face:(?:wx|qq):[^\]]+\]/g, '[表情]');
+}
+
 export async function pushChatMessage(db, msg, senderKey, opts) {
   opts = opts || {};
   if (!(await isEnabled(db))) return;
@@ -61,9 +97,9 @@ export async function pushChatMessage(db, msg, senderKey, opts) {
   globalThis.__WX_APP_TOKEN = appToken;
   const members = await fetchMemberUids(db, senderKey);
   if (!members.length) return;
-  const summary = summarize(msg);
-  const text = `${msg.sender_name || '有人'}给你发了消息：${summary}`;
-  for (const m of members) enqueuePush(m, text, memberUrl(opts.origin || '', m));
+  const summary = plainText(summarize(msg));
+  const html = await contentToHtml(`${msg.sender_name || '有人'}给你发了消息：${summary}`, opts.origin || '');
+  for (const m of members) enqueuePush(m, html, memberUrl(opts.origin || '', m));
 }
 
 // v5.1：群公告变更推送（复用频控）
@@ -75,9 +111,9 @@ export async function pushNotice(db, authorName, content, senderKey, opts) {
   globalThis.__WX_APP_TOKEN = appToken;
   const members = await fetchMemberUids(db, senderKey);
   if (!members.length) return;
-  const summary = content.length > 60 ? content.slice(0, 60) + '…' : content;
-  const text = `${authorName}更新了群公告：${summary}`;
-  for (const m of members) enqueuePush(m, text, memberUrl(opts.origin || '', m), '【班级积分系统】群公告');
+  const summary = plainText(content.length > 60 ? content.slice(0, 60) + '…' : content);
+  const html = await contentToHtml(`${authorName}更新了群公告：${summary}`, opts.origin || '');
+  for (const m of members) enqueuePush(m, html, memberUrl(opts.origin || '', m), '【班级积分系统】群公告');
 }
 
 async function getAppToken(db) {

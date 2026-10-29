@@ -151,9 +151,7 @@
     // 草稿恢复
     const draft = localStorage.getItem(LS_DRAFT + ':' + (state.me && state.me.member_key || 'front'));
     if (draft) {
-      els.input.value = draft;
-      els.input.style.height = 'auto';
-      els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
+      els.input.textContent = draft;
       if (els.sendBtn) els.sendBtn.disabled = !draft.trim();
     }
   }
@@ -453,15 +451,64 @@
     requestAnimationFrame(() => { els.scroll.scrollTop = els.scroll.scrollHeight; });
   }
 
+  // ---------- 输入框（contenteditable，表情以小图显示） ----------
+  function getInputText() {
+    let out = '';
+    function walk(node) {
+      node.childNodes.forEach(n => {
+        if (n.nodeType === 3) {
+          out += n.textContent;
+        } else if (n.nodeType === 1) {
+          const tag = n.tagName.toLowerCase();
+          if (tag === 'img') out += n.getAttribute('data-code') || '';
+          else if (tag === 'br') out += '\n';
+          else if (tag === 'div') {
+            if (out && !out.endsWith('\n')) out += '\n';
+            walk(n);
+          } else walk(n);
+        }
+      });
+    }
+    walk(els.input);
+    return out.trim();
+  }
+  function clearInput() {
+    els.input.innerHTML = '';
+  }
+  function insertAtCaret(node) {
+    els.input.focus();
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !els.input.contains(sel.anchorNode)) {
+      els.input.appendChild(node);
+    } else {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.setEndAfter(node);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+  function insertFace(kind, id, src) {
+    const img = document.createElement('img');
+    img.src = src;
+    img.className = 'face-chip';
+    img.draggable = false;
+    img.setAttribute('data-code', `[face:${kind}:${id}]`);
+    insertAtCaret(img);
+    els.input.dispatchEvent(new Event('input'));
+  }
+
   // ---------- 发送 ----------
   async function send() {
-    const text = els.input.value.trim();
+    const text = getInputText();
     if (!text) return;
     const body = { msg_type: 'text', content: text, reply_to: state.replyTo ? state.replyTo.uid : '' };
     // v5.1: 先插入一条本地 pending 消息，失败标红可重发
     const pending = { id: -Date.now(), uid: 'pending-' + Date.now(), sender_key: state.me.member_key, sender_name: state.me.name, sender_avatar: state.me.avatar, msg_type: 'text', content: text, attachments: [], reply_to: body.reply_to, reply: {}, recalled: 0, deleted: 0, created_at: Date.now(), failed: true, _body: body };
     state.messages.push(pending);
-    els.input.value = '';
+    clearInput();
     els.sendBtn.disabled = true;
     localStorage.removeItem(LS_DRAFT + ':' + state.me.member_key);
     state.replyTo = null; els.replyBar.classList.remove('show');
@@ -515,7 +562,7 @@
       }
     });
     els.sendBtn.onclick = send;
-    if (els.sendBtn) els.sendBtn.disabled = !els.input.value.trim();
+    if (els.sendBtn) els.sendBtn.disabled = !getInputText();
     // v5.1: 上滑到顶加载更早消息
     els.scroll.addEventListener('scroll', async () => {
       if (els.scroll.scrollTop < 40 && !state.loadingMore && state.messages.length) {
@@ -534,19 +581,17 @@
       }
     });
     els.input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
-        send();
+        if (e.shiftKey) insertAtCaret(document.createElement('br'));
+        else send();
       }
     });
     els.input.addEventListener('input', () => {
       const mk = state.me ? state.me.member_key : 'front';
-      localStorage.setItem(LS_DRAFT + ':' + mk, els.input.value);
-      // v5.1: 发送按钮空内容禁用
-      if (els.sendBtn) els.sendBtn.disabled = !els.input.value.trim();
-      // 自适应高度
-      els.input.style.height = 'auto';
-      els.input.style.height = Math.min(els.input.scrollHeight, 120) + 'px';
+      localStorage.setItem(LS_DRAFT + ':' + mk, getInputText());
+      // 发送按钮空内容禁用
+      if (els.sendBtn) els.sendBtn.disabled = !getInputText();
     });
     els.imgBtn.onclick = () => els.imgInput.click();
     els.cameraBtn.onclick = () => els.cameraInput.click();
@@ -753,9 +798,10 @@
     }).join('');
     els.faceGrid.querySelectorAll('.fcell').forEach(el => {
       el.onclick = () => {
-        const token = `[face:${el.dataset.kind}:${el.dataset.id}]`;
-        els.input.value += token;
-        els.input.focus();
+        const kind = el.dataset.kind;
+        const id = el.dataset.id;
+        const img = el.querySelector('img');
+        insertFace(kind, id, img ? img.src : '');
       };
     });
   }

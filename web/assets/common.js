@@ -624,6 +624,94 @@
   };
 
   /* ---------- 更多聚合菜单（站点/反馈/版本）：点击即开 ---------- */
+  /* ---------- 极速预载（一键预缓存，分基础包/完整包） ---------- */
+  CP.openPreloadStation = function () {
+    const box = CP.modal('', { size: 'md' });
+    const BASE = [
+      '/', '/index.html', '/new', '/history', '/chat',
+      '/assets/apple.css', '/assets/common.js',
+      '/assets/page-index.css', '/assets/page-index.js',
+      '/assets/page-chat.css', '/assets/page-chat.js',
+      '/assets/page-history.css', '/assets/page-history.js',
+      '/assets/page-new.css', '/assets/page-new.js',
+      '/assets/vendor/fontawesome/css/all.min.css',
+      '/assets/vendor/fontawesome/webfonts/fa-brands-400.woff2',
+      '/assets/vendor/fontawesome/webfonts/fa-regular-400.woff2',
+      '/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2',
+      '/assets/icons/icon-192.png', '/assets/icons/icon-512.png', '/assets/logo.svg',
+    ];
+    let fullUrls = BASE.slice();
+    let running = false;
+
+    function render(statusText) {
+      box.innerHTML = `
+        <h3><i class="fas fa-gauge-high" style="color:var(--primary);margin-right:7px"></i>极速预载</h3>
+        <p class="text-2" style="margin:0 0 12px">把网页资源提前下载到本机，之后打开秒开、弱网也流畅。</p>
+        <div id="pl-status" style="font-size:13px;margin-bottom:12px">${statusText || '正在读取资源清单…'}</div>
+        <div id="pl-progress" style="display:none;margin-bottom:14px">
+          <div class="pl-bar"><div id="pl-bar-fill" class="pl-bar-fill"></div></div>
+          <div id="pl-pct" class="text-3" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" id="pl-clear">清除预载</button>
+          <button class="btn btn-soft" id="pl-base">下载基础包</button>
+          <button class="btn btn-primary" id="pl-full">下载完整包</button>
+        </div>`;
+      box.querySelector('#pl-clear').onclick = () => {
+        if (running) return;
+        navigator.serviceWorker.controller && navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_PRELOAD' });
+        render('已清除预载缓存，恢复为默认联网加载。');
+      };
+      box.querySelector('#pl-base').onclick = () => start(BASE, '基础包');
+      box.querySelector('#pl-full').onclick = () => start(fullUrls, '完整包');
+    }
+
+    function onMsg(e) {
+      const m = e.data || {};
+      if (m.type === 'PRECACHE_PROGRESS' || m.type === 'PRECACHE_DONE') {
+        const prog = box.querySelector('#pl-progress');
+        if (prog) {
+          prog.style.display = '';
+          const pct = m.total ? Math.round(m.done / m.total * 100) : 0;
+          box.querySelector('#pl-bar-fill').style.width = pct + '%';
+          box.querySelector('#pl-pct').textContent = `${m.done} / ${m.total}（${pct}%）`;
+        }
+        if (m.type === 'PRECACHE_DONE') {
+          running = false;
+          render(`<i class="fas fa-circle-check" style="color:var(--green,#34c759)"></i> 预载完成，共缓存 ${m.total} 项，之后打开秒开。`);
+        }
+      }
+    }
+
+    function start(urls, label) {
+      if (running) return;
+      const reg = navigator.serviceWorker;
+      if (!reg || !reg.controller) { CP.toast('预载组件尚未就绪，请稍后重试', 'error'); return; }
+      running = true;
+      render(`正在下载${label}，请保持页面打开…`);
+      box.querySelector('#pl-progress').style.display = '';
+      reg.controller.postMessage({ type: 'PRECACHE', urls });
+    }
+
+    navigator.serviceWorker.addEventListener('message', onMsg);
+    render();
+    // 读取表情清单，构建完整包
+    fetch('/assets/qq-face/face-manifest.json').then(r => r.json()).then(mf => {
+      const collect = sec => (sec.order || []).map(id => {
+        const f = sec.faces[id];
+        const p = f && (f.anim || f.png);
+        return p ? '/assets/qq-face/' + p : null;
+      }).filter(Boolean);
+      if (mf.wechat) fullUrls = fullUrls.concat(collect(mf.wechat));
+      if (mf.qq) fullUrls = fullUrls.concat(collect(mf.qq));
+      const unique = [...new Set(fullUrls)];
+      fullUrls = unique;
+      render(`基础包 <b>${BASE.length}</b> 项（很小）；完整包 <b>${unique.length}</b> 项（含全部表情，约 100MB+，建议 WiFi 下下载）。`);
+    }).catch(() => render(`基础包 <b>${BASE.length}</b> 项；完整包暂不可用（表情清单未加载）。`));
+    // 报告当前预载状态
+    if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'PRELOAD_STATUS' });
+  };
+
   CP.openMoreMenu = function (anchor) {
     if (!anchor || !anchor.getBoundingClientRect) return;
     let pop = null, back = null;
@@ -642,6 +730,7 @@
     pop.className = 'site-switch-pop more-pop';
     pop.innerHTML = '<div class="ss-title">更多</div>' + [
       ['切换站点', 'fa-globe', 'switch'],
+      ['极速预载', 'fa-gauge-high', 'preload'],
       ['意见反馈', 'fa-comment-dots', 'feedback'],
       ['关于版本', 'fa-circle-info', 'version']
     ].map(it => `<button class="ss-item" data-act="${it[2]}"><i class="fas ${it[1]}"></i><span>${it[0]}</span></button>`).join('');
@@ -660,6 +749,7 @@
     pop.querySelectorAll('.ss-item').forEach(b => b.onclick = () => {
       const act = b.dataset.act; close();
       if (act === 'switch') CP.openSiteSwitcher(anchor);
+      else if (act === 'preload') CP.openPreloadStation();
       else if (act === 'feedback') CP.feedbackModal();
       else if (act === 'version') CP.versionToast();
     });

@@ -288,6 +288,11 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   width: 0; transition: width .2s ease; }
 .progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2); }
 
+/* 极速预载进度条 */
+.pl-bar { height: 8px; border-radius: 99px; background: var(--fill); overflow: hidden; }
+.pl-bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), var(--blue));
+  width: 0; transition: width .2s ease; }
+
 /* ---------- 应用骨架：三栏 + 抽屉 ---------- */
 .app-shell { display: grid; grid-template-columns: 248px minmax(0,1fr) 330px; gap: 14px;
   padding: 14px; max-width: 1760px; margin: 0 auto; align-items: start; min-height: 100vh; }
@@ -337,6 +342,7 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .nav-entry .fa { width: 20px; text-align: center; color: var(--primary); }
 .nav-entry .t { flex: 1; }
 .nav-entry .chev { color: var(--text-3); }
+.nav-stack { display: flex; flex-direction: column; gap: 8px; }
 .list-clean { list-style: none; margin: 0; padding: 0; }
 .list-clean li { padding: 10px 2px; border-bottom: 1px solid var(--separator); }
 .list-clean li:last-child { border-bottom: none; }
@@ -395,3 +401,40 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sys-ann-modal-body { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
 .ext-links{display:flex;gap:6px;margin-left:auto;align-items:center;flex:none}.ext-links a{color:var(--text-2);font-size:14px;padding:3px 4px;white-space:nowrap}
+
+/* ---------- 超小屏适配：手机窄屏 ≤360px / 手表超小屏 ≤280px ---------- */
+@media (max-width: 360px) {
+  :root { --radius-lg: 18px; --radius: 14px; --radius-sm: 10px; --radius-xs: 8px; }
+  .app-shell { padding: 56px 8px 10px; }
+  .mobile-topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .mobile-btn { width: 34px; height: 34px; border-radius: 10px; font-size: 15px; }
+  .mobile-topbar .icon-btn { width: 32px; height: 32px; font-size: 15px; }
+  .stat-tile { padding: 10px; }
+  .stat-tile .v { font-size: 20px; }
+  .nav-entry { padding: 11px 12px; font-size: 13.5px; }
+  .modal { padding: 18px 16px calc(18px + var(--safe-b)); }
+  .modal h3 { font-size: 17px; margin-bottom: 12px; }
+  .btn { height: 40px; padding: 0 14px; font-size: 14px; }
+  .chip { padding: 4px 9px; font-size: 12.5px; }
+  .cards.students, .cards.groups { grid-template-columns: 1fr; }
+  .stu-card { padding: 13px; }
+}
+@media (max-width: 280px) {
+  :root { --radius-lg: 16px; --radius: 12px; --radius-sm: 9px; --radius-xs: 7px; }
+  .app-shell { padding: 54px 6px 8px; }
+  .mobile-topbar { gap: 4px; padding-left: 6px; padding-right: 6px; }
+  .mobile-btn { width: 30px; height: 30px; border-radius: 9px; font-size: 14px; }
+  .mobile-topbar .icon-btn { width: 28px; height: 28px; font-size: 13px; }
+  .mobile-topbar #m-title { font-size: 15px; }
+  .stat-grid { gap: 7px; }
+  .stat-tile { padding: 8px; }
+  .stat-tile .v { font-size: 18px; }
+  .stat-tile .k { font-size: 11px; }
+  .nav-entry { padding: 10px 10px; font-size: 13px; gap: 8px; }
+  .nav-entry .fa { width: 18px; }
+  .modal { padding: 16px 14px calc(16px + var(--safe-b)); }
+  .modal h3 { font-size: 16px; }
+  .btn { height: 38px; padding: 0 12px; font-size: 13.5px; }
+  .chip { padding: 3px 8px; font-size: 12px; }
+  .stu-card { padding: 11px; }
+}

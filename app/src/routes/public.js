@@ -18,9 +18,13 @@ export function publicRoutes() {
     const sound = await getConfig(db, 'notify_sound') || 'ganlu';
     const soundUrl = await getConfig(db, 'notify_sound_url') || '';
     const modalBlurEnabled = await getConfig(db, 'modal_blur_enabled') || '1';
-    let sitesArr = [], extObj = {};
+    const ctxMenuTitle = await getConfig(db, 'ctx_menu_title') || '你想干嘛？';
+    const sayingLink = await getConfig(db, 'saying_link') || 'https://uapis.cn';
+    const customStickers = await getConfig(db, 'custom_stickers') || '[]';
+    let sitesArr = [], extObj = {}, stickersArr = [];
     try { sitesArr = JSON.parse(sites); } catch {}
     try { extObj = JSON.parse(extLinks); } catch {}
+    try { stickersArr = JSON.parse(customStickers); } catch {}
     return c.json({
       ok: true,
       sites: sitesArr,
@@ -29,6 +33,9 @@ export function publicRoutes() {
       notify_sound: sound,
       notify_sound_url: soundUrl,
       modal_blur_enabled: modalBlurEnabled,
+      ctx_menu_title: ctxMenuTitle,
+      saying_link: sayingLink,
+      custom_stickers: stickersArr,
       instance: c.get('origin') === 'worker' ? 'worker' : 'node',
     });
   });

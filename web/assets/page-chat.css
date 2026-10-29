@@ -84,11 +84,13 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
 .chat-input .reply-bar.show { display: flex; align-items: center; gap: 8px; }
 .chat-input .reply-bar .cancel { margin-left: auto; cursor: pointer; }
 .chat-input .row { display: flex; align-items: flex-end; gap: 6px; }
-.chat-input textarea {
+.chat-input .input-box {
   flex: 1; resize: none; border: 1px solid var(--chat-line); border-radius: 10px;
   padding: 8px 10px; font-size: 15px; min-height: 38px; max-height: 120px; outline: none; background: #fff;
-  font-family: inherit;
+  font-family: inherit; overflow-y: auto; line-height: 1.4; white-space: pre-wrap; word-break: break-word;
 }
+.chat-input .input-box:empty::before { content: attr(data-placeholder); color: var(--chat-text-2, #9aa0a6); }
+.chat-input .input-box .face-chip { width: 22px; height: 22px; vertical-align: -5px; object-fit: contain; margin: 0 1px; }
 .chat-input .icon-btn { width: 38px; height: 38px; }
 .chat-input .send-btn { display: inline-flex; align-items: center; justify-content: center; }
 @media (max-width: 600px) {
@@ -160,4 +162,20 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
   #chat-face-panel { width: 220px; }
   #chat-face-grid { grid-template-columns: repeat(7, 28px); }
   .chat-row .bubble { max-width: 65vw; }
+}
+/* 超小屏：输入栏与表情面板密度压缩（手机窄屏 ≤360px / 手表 ≤280px） */
+@media (max-width: 360px) {
+  .chat-input .icon-btn { width: 34px; height: 34px; font-size: 15px; }
+  .chat-input .input-box { font-size: 14px; padding: 7px 9px; min-height: 36px; }
+  .face-panel .fcell img { width: 28px; height: 28px; }
+  #chat-face-grid { grid-template-columns: repeat(6, 28px); gap: 3px; }
+}
+@media (max-width: 280px) {
+  .chat-input { padding: 6px; }
+  .chat-input .icon-btn { width: 30px; height: 30px; font-size: 14px; }
+  .chat-input .input-box { font-size: 13px; padding: 6px 8px; min-height: 34px; }
+  .chat-input .row { gap: 4px; }
+  .face-panel .fcell img { width: 26px; height: 26px; }
+  #chat-face-grid { grid-template-columns: repeat(5, 26px); gap: 3px; }
+  .chat-row .bubble { max-width: 60vw; font-size: 13.5px; }
 }
