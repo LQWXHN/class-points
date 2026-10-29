@@ -141,6 +141,7 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
 
 /* v5.1: 时间分隔条 + 消息分组 */
 .chat-time-divider { text-align:center; color:var(--chat-text-2); font-size:11px; margin:8px 0; }
+.msg-time { font-size: 10px; color: #b6b6bc; margin-top: 3px; }
 .chat-row.grouped { margin-top:2px; }
 .chat-row.grouped .avatar-wrap, .chat-row.grouped .name { display:none; }
 .chat-row.grouped .body { margin-left:0; }

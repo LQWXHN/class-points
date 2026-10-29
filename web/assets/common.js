@@ -681,8 +681,11 @@
 
     navigator.serviceWorker.addEventListener('message', onMsg);
     render();
-    // 读取表情清单，只收集图片
-    fetch('/assets/qq-face/face-manifest.json').then(r => r.json()).then(mf => {
+    // 读取表情清单，只收集图片（带 15s 超时，避免弱网下一直挂起）
+    const ctrl = new AbortController();
+    const toTimer = setTimeout(() => ctrl.abort(), 15000);
+    fetch('/assets/qq-face/face-manifest.json', { signal: ctrl.signal }).then(r => r.json()).then(mf => {
+      clearTimeout(toTimer);
       const collect = sec => (sec.order || []).map(id => {
         const f = sec.faces[id];
         const p = f && (f.anim || f.png);
@@ -693,7 +696,7 @@
       if (mf.qq) urls = urls.concat(collect(mf.qq));
       imageUrls = [...new Set(urls)];
       render(`图片包共 <b>${imageUrls.length}</b> 张表情（约 100MB，建议 WiFi 下下载）。页面、字体等会自动缓存，无需手动下载。`);
-    }).catch(() => render('图片清单暂不可用（表情清单未加载）。'));
+    }).catch(() => { clearTimeout(toTimer); render('图片清单暂不可用（网络慢或未加载），可稍后再试。'); });
     // 报告当前预载状态
     if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'PRELOAD_STATUS' });
   };
