@@ -214,6 +214,77 @@ async function doExport(box) {
   } finally { btn.disabled = false; }
 }
 
+/* ---------- 拟造记录（v5.4：仅超管，from=admin&fabricate=1） ---------- */
+async function openFabricateModal() {
+  let students = [], groups = [], reasons = [];
+  try {
+    const snap = await CP.api('/snapshot', { handle401: false });
+    const d = (snap && (snap.data || snap)) || {};
+    students = d.students || [];
+    groups = d.groups || [];
+  } catch {}
+  try {
+    const r = await CP.api('/rules', { handle401: false });
+    const arr = (r && (r.data || r)) || [];
+    reasons = [...new Set(arr.map(x => (x.reason || '').trim()).filter(Boolean))];
+  } catch {}
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const defTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const box = CP.modal(`
+    <h3><i class="fas fa-wand-magic-sparkles" style="color:var(--orange);margin-right:7px"></i>拟造记录</h3>
+    <p class="text-2" style="margin:0 0 12px">生成一条不关联真实操作的积分记录（仅超管可见）</p>
+    <div class="form-row"><label class="form-label">对象类型</label>
+      <select id="fab-target" class="form-select">
+        <option value="student">学生</option>
+        <option value="group">小组</option>
+      </select></div>
+    <div class="form-row"><label class="form-label">对象</label>
+      <select id="fab-id" class="form-select"></select></div>
+    <div class="form-row"><label class="form-label">原因</label>
+      <select id="fab-reason" class="form-select">
+        ${reasons.length ? reasons.map(r => `<option>${CP.esc(r)}</option>`).join('') : '<option value="">（暂无规则）</option>'}
+      </select></div>
+    <div class="form-row"><label class="form-label">分值（带符号）</label>
+      <input id="fab-points" type="number" class="form-input" placeholder="如 10 或 -5" min="-100" max="100" style="text-align:center;font-weight:700;font-size:18px"></div>
+    <div class="form-row"><label class="form-label">时间</label>
+      <input id="fab-time" type="datetime-local" class="form-input" value="${defTime}"></div>
+    <div class="modal-foot">
+      <button class="btn" data-act="cancel">取消</button>
+      <button class="btn btn-primary" data-act="ok"><i class="fas fa-wand-magic-sparkles"></i> 拟造</button>
+    </div>`, { size: 'sm' });
+  function renderObjOptions() {
+    const t = box.querySelector('#fab-target').value;
+    const sel = box.querySelector('#fab-id');
+    const list = t === 'student' ? students : groups;
+    sel.innerHTML = list.length
+      ? list.map(x => `<option value="${CP.esc(x.uid)}">${CP.esc(x.name)}${t === 'student' && x.student_no ? '（' + CP.esc(x.student_no) + '）' : ''}</option>`).join('')
+      : '<option value="">暂无对象</option>';
+  }
+  renderObjOptions();
+  box.querySelector('#fab-target').onchange = renderObjOptions;
+  box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+  box.querySelector('[data-act=ok]').onclick = async () => {
+    const target = box.querySelector('#fab-target').value;
+    const id = box.querySelector('#fab-id').value;
+    const reason = (box.querySelector('#fab-reason').value || '').trim();
+    const points = parseInt(box.querySelector('#fab-points').value) || 0;
+    const timeStr = box.querySelector('#fab-time').value;
+    if (!id) return CP.toast('请选择对象', 'warn');
+    if (!reason) return CP.toast('请选择原因', 'warn');
+    if (!Number.isInteger(points) || points === 0 || Math.abs(points) > 100) return CP.toast('分值需为 -100 至 100 的非零整数', 'warn');
+    const time = timeStr ? Date.parse(timeStr) : Date.now();
+    if (!time || isNaN(time)) return CP.toast('时间格式不正确', 'warn');
+    const btn = box.querySelector('[data-act=ok]'); btn.disabled = true;
+    try {
+      await CP.api('/points/fabricate', { method: 'POST', body: { target, id, reason, points, time } });
+      CP.closeModal();
+      CP.toast('已拟造记录', 'success');
+      await load(true);
+    } catch (e) { CP.failToast(e, '拟造失败'); btn.disabled = false; }
+  };
+}
+
 /* ---------- 事件 ---------- */
 function bind() {
   document.querySelectorAll('#type-seg button').forEach(b => b.onclick = () => setType(b.dataset.t));
@@ -232,9 +303,23 @@ function bind() {
 
 (async function init() {
   CP.applyTitle('历史记录');
-  const ok = await CP.requireDevice();
-  if (!ok) return;
+  // staff（admin_token）可直接进入；前台设备仍需激活
+  if (!CP.getAdminToken()) {
+    const ok = await CP.requireDevice();
+    if (!ok) return;
+  }
   bind();
+  // v5.4: 拟造入口（query fabricate=1 且 /auth/me 确认 super 才显示）
+  if (new URLSearchParams(location.search).get('fabricate') === '1') {
+    try {
+      const me = await CP.api('/auth/me', { handle401: false });
+      const d = (me && (me.data || me)) || {};
+      if (d.role === 'super') {
+        const fb = $('btn-fabricate');
+        if (fb) { fb.style.display = ''; fb.onclick = openFabricateModal; }
+      }
+    } catch {}
+  }
   const initType = new URLSearchParams(location.search).get('type');
   if (['all', 'add', 'sub', 'system'].includes(initType)) {
     setType(initType, true);

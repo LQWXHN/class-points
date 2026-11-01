@@ -328,7 +328,16 @@ function selectGroup(gid) {
 }
 
 /* ---------- 单人快捷加减分 ---------- */
-function quickChange(sid, type) {
+async function loadQcCategories() {
+  try {
+    const r = await CP.api('/rules/categories', { handle401: false });
+    const arr = (r && (r.data || r)) || [];
+    if (Array.isArray(arr) && arr.length) return arr;
+  } catch (e) { /* 失败走本地兜底 */ }
+  return [...new Set(appData.rules.filter(r => r.type === 'add' || r.type === 'sub')
+    .map(r => r.category || '常规').filter(Boolean))];
+}
+async function quickChange(sid, type) {
   const s = appData.students.find(x => x.id === sid);
   if (!s) return;
   const rules = appData.rules.filter(r => r.type === type);
@@ -337,61 +346,100 @@ function quickChange(sid, type) {
   const sign = type === 'add' ? '+' : '-';
   const box = CP.modal(`
     <h3>${opText} — ${CP.esc(s.name)}</h3>
-    <p style="color:var(--text-2);margin:0 0 14px">当前积分 <b>${s.points}</b></p>
-    <div class="form-row"><label class="form-label">原因</label>
-      <select id="qc-reason" class="form-select">
-        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${sign}${Math.abs(r.points)})</option>`).join('')}
-      </select></div>
-    <div class="form-row"><label class="form-label">积分值</label>
-      <input id="qc-points" type="number" class="form-input" value="${Math.abs(rules[0] && rules[0].points) || 10}" min="1" style="text-align:center;font-weight:700;font-size:18px">
-      <div class="quick-pts">
-        <button type="button" data-addval="5">${sign}5</button>
-        <button type="button" data-addval="10">${sign}10</button>
-        <button type="button" data-addval="20">${sign}20</button>
-      </div></div>
-    <div class="form-row" id="qc-custom-row" style="display:none"><label class="form-label">自定义原因（1-30字）</label>
-      <input id="qc-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
+    <p style="color:var(--text-2);margin:0 0 12px">当前积分 <b>${s.points}</b></p>
+    <div id="qc-cats" class="qc-cat-bar"></div>
+    <div id="qc-rules" class="qc-rules"></div>
+    <div id="qc-custom-row" style="display:none">
+      <div class="form-row"><label class="form-label">自定义原因（1-30字）</label>
+        <input id="qc-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
+      <div class="form-row"><label class="form-label">积分值</label>
+        <input id="qc-points" type="number" class="form-input" value="10" min="1" style="text-align:center;font-weight:700;font-size:18px">
+        <div class="quick-pts">
+          <button type="button" data-addval="5">${sign}5</button>
+          <button type="button" data-addval="10">${sign}10</button>
+          <button type="button" data-addval="20">${sign}20</button>
+        </div></div>
+    </div>
     <div class="modal-foot">
       <button class="btn" data-act="cancel">取消</button>
-      <button class="btn ${type === 'add' ? 'btn-success' : 'btn-danger'}" data-act="ok">${opText}</button>
+      <button class="btn ${type === 'add' ? 'btn-success' : 'btn-danger'}" id="qc-confirm" disabled>${opText}</button>
     </div>`, { size: 'sm' });
-  box.querySelector('#qc-reason').onchange = function () {
-    const isCustom = this.value === '自定义';
-    box.querySelector('#qc-custom-row').style.display = isCustom ? '' : 'none';
-    const p = this.options[this.selectedIndex].getAttribute('data-p');
-    if (isCustom) { box.querySelector('#qc-points').value = ''; }
-    else if (p) box.querySelector('#qc-points').value = Math.abs(parseInt(p) || 0);
-  };
+  let curCat = '';
+  let sel = null; // 选中的规则（小确认：点卡片仅选中）
+
+  function updateCustomRow() {
+    const row = box.querySelector('#qc-custom-row');
+    const isCustom = sel && Number(sel.is_builtin) === 1;
+    row.style.display = isCustom ? '' : 'none';
+    if (isCustom) {
+      box.querySelector('#qc-points').value = Math.abs(Number(sel.points)) || 10;
+      box.querySelector('#qc-custom-reason').value = '';
+    }
+  }
+  function updateConfirm() {
+    box.querySelector('#qc-confirm').disabled = !sel;
+  }
+  function renderCats(cats) {
+    const bar = box.querySelector('#qc-cats');
+    bar.innerHTML = cats.map(c => `<button class="qc-cat ${c === curCat ? 'active' : ''}" data-cat="${CP.esc(c)}">${CP.esc(c)}</button>`).join('');
+    bar.querySelectorAll('.qc-cat').forEach(b => b.onclick = () => {
+      curCat = b.dataset.cat; sel = null;
+      renderCats(cats); renderRules(cats);
+    });
+  }
+  function renderRules(cats) {
+    const wrap = box.querySelector('#qc-rules');
+    const list = rules.filter(r => (r.category || '常规') === curCat);
+    if (!list.length) {
+      wrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:22px 0">该分类暂无规则</div>';
+      updateCustomRow(); updateConfirm();
+      return;
+    }
+    wrap.innerHTML = list.map((r, i) => `
+      <div class="qc-rule-card ${type} ${sel === r ? 'selected' : ''}" data-i="${i}">
+        <span class="rc-reason">${CP.esc(r.reason)}</span>
+        <span class="rc-pts">${sign}${Math.abs(r.points)}</span>
+      </div>`).join('');
+    wrap.querySelectorAll('.qc-rule-card').forEach(el => el.onclick = () => {
+      sel = list[Number(el.dataset.i)];
+      renderRules(cats);
+      updateCustomRow();
+      updateConfirm();
+    });
+  }
+  function doConfirm() {
+    if (!sel) return;
+    let reason, p;
+    if (Number(sel.is_builtin) === 1) {
+      reason = (box.querySelector('#qc-custom-reason').value || '').trim();
+      if (!reason || reason.length > 30) return CP.toast('自定义原因需 1-30 字', 'warn');
+      p = parseInt(box.querySelector('#qc-points').value) || 0;
+      if (!Number.isInteger(p) || p < 1 || p > 100) return CP.toast('积分值需 1-100 整数', 'warn');
+    } else {
+      reason = sel.reason;
+      p = Math.abs(Number(sel.points)) || 10;
+    }
+    p = type === 'sub' ? -Math.abs(p) : Math.abs(p);
+    const op = { studentId: sid, points: p, reason, type };
+    if (Number(sel.is_builtin) === 1) op.custom = 1;
+    const btn = box.querySelector('#qc-confirm'); btn.disabled = true;
+    CP.api('/points/batch', { method: 'POST', body: { operations: [op] } }).then(() => {
+      CP.toast(`${s.name} ${p > 0 ? '加' : '减'} ${Math.abs(p)} 分`, 'success');
+      CP.closeModal();
+      refreshData();
+    }).catch(e => { CP.failToast(e); btn.disabled = false; });
+  }
+
+  box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+  box.querySelector('#qc-confirm').onclick = doConfirm;
   box.querySelectorAll('[data-addval]').forEach(b => b.onclick = () => {
     const inp = box.querySelector('#qc-points');
     inp.value = Math.max(1, (parseInt(inp.value) || 0) + parseInt(b.getAttribute('data-addval')));
   });
-  box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
-  box.querySelector('[data-act=ok]').onclick = () => doQuickChange(sid, type, box);
-}
-async function doQuickChange(sid, type, box) {
-  const s = appData.students.find(x => x.id === sid);
-  if (!s) return;
-  const isCustom = box.querySelector('#qc-reason').value === '自定义';
-  let reason, p;
-  if (isCustom) {
-    reason = (box.querySelector('#qc-custom-reason').value || '').trim();
-    if (!reason || reason.length > 30) return CP.toast('自定义原因需 1-30 字', 'warn');
-    p = parseInt(box.querySelector('#qc-points').value) || 0;
-    if (!Number.isInteger(p) || p < 1 || p > 100) return CP.toast('积分值需 1-100 整数', 'warn');
-  } else {
-    reason = box.querySelector('#qc-reason').value;
-    p = parseInt(box.querySelector('#qc-points').value) || 0;
-  }
-  p = type === 'sub' ? -Math.abs(p) : Math.abs(p);
-  const op = { studentId: sid, points: p, reason, type: type === 'sub' ? 'sub' : 'add' };
-  if (isCustom) op.custom = 1;
-  try {
-    await CP.api('/points/batch', { method: 'POST', body: { operations: [op] } });
-    CP.toast(`${s.name} ${p > 0 ? '加' : '减'} ${Math.abs(p)} 分`, 'success');
-    CP.closeModal();
-    refreshData();
-  } catch (e) { CP.failToast(e); }
+  const cats = await loadQcCategories();
+  curCat = cats[0] || '常规';
+  renderCats(cats);
+  renderRules(cats);
 }
 
 /* ---------- 批量加减分 ---------- */

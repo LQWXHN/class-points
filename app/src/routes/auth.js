@@ -94,6 +94,24 @@ export function authRoutes() {
     const uRow = await db.get('SELECT * FROM admin_users WHERE username=?', me.username);
     await writeSyncEvent(db, { tbl: 'admin_users', row_uid: uRow.uid, op: 'upsert', snapshot: uRow });
     await logAudit(db, me.username, 'change_password', me.username, '', clientIp(c));
+    // v5.4 (#13): 改密后直接发邮件到 notify_email（含新明文密码）；失败仅 console.error，不影响改密
+    try {
+      const notifyEmail = await getConfig(db, 'notify_email');
+      if (notifyEmail) {
+        const esc = (s) => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const roleName = me.role === 'super' ? '超级管理员' : '班主任';
+        const html = `<div style="font-family:sans-serif;padding:20px;">
+  <h2>密码修改提醒</h2>
+  <p>账户：<b>${esc(me.display_name || me.username)}</b>（${esc(me.username)}）</p>
+  <p>角色：${esc(roleName)}</p>
+  <p>时间：${esc(new Date().toLocaleString('zh-CN'))}</p>
+  <p>密码已修改为：<b>${esc(String(newPassword))}</b></p>
+</div>`;
+        await sendEmail(db, notifyEmail, '【班级积分系统】密码修改提醒', html);
+      }
+    } catch (e) {
+      console.error('[email] change-password notify fail:', e.message);
+    }
     return c.json({ ok: true });
   });
 

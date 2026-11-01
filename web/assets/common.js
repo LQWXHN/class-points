@@ -626,12 +626,11 @@
   /* ---------- 更多聚合菜单（站点/反馈/版本）：点击即开 ---------- */
   /* ---------- 极速预载（只预缓存表情图片，页面/字体等由 SW 自动缓存） ---------- */
   CP.openPreloadStation = function () {
-    const box = CP.modal('', { size: 'md' });
     let imageUrls = [];
     let running = false;
 
-    function render(statusText) {
-      box.innerHTML = `
+    function stationHTML(statusText) {
+      return `
         <h3><i class="fas fa-gauge-high" style="color:var(--primary);margin-right:7px"></i>极速预载</h3>
         <p class="text-2" style="margin:0 0 12px">提前把表情图片下载到本机，聊天发图秒开、弱网也流畅。</p>
         <div id="pl-status" style="font-size:13px;margin-bottom:12px">${statusText || '正在读取图片清单…'}</div>
@@ -643,12 +642,20 @@
           <button class="btn" id="pl-clear">清除预载</button>
           <button class="btn btn-primary" id="pl-go">下载图片包</button>
         </div>`;
-      box.querySelector('#pl-clear').onclick = () => {
-        if (running) return;
-        navigator.serviceWorker.controller && navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_PRELOAD' });
-        render('已清除预载缓存，恢复为默认联网加载。');
-      };
-      box.querySelector('#pl-go').onclick = () => start(imageUrls, '图片包');
+    }
+
+    // 一次建好完整首帧，后续只更新内部容器，避免空白卡
+    const box = CP.modal(stationHTML(), { size: 'md' });
+
+    function render(statusText) {
+      const st = box.querySelector('#pl-status');
+      if (st) st.innerHTML = statusText || '正在读取图片清单…';
+      const prog = box.querySelector('#pl-progress');
+      if (prog) prog.style.display = 'none';
+      const fill = box.querySelector('#pl-bar-fill');
+      if (fill) fill.style.width = '0%';
+      const pct = box.querySelector('#pl-pct');
+      if (pct) pct.textContent = '';
     }
 
     function onMsg(e) {
@@ -679,8 +686,14 @@
       reg.controller.postMessage({ type: 'PRECACHE', urls });
     }
 
+    box.querySelector('#pl-clear').onclick = () => {
+      if (running) return;
+      navigator.serviceWorker.controller && navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_PRELOAD' });
+      render('已清除预载缓存，恢复为默认联网加载。');
+    };
+    box.querySelector('#pl-go').onclick = () => start(imageUrls, '图片包');
+
     navigator.serviceWorker.addEventListener('message', onMsg);
-    render();
     // 读取表情清单，只收集图片（带 15s 超时，避免弱网下一直挂起）
     const ctrl = new AbortController();
     const toTimer = setTimeout(() => ctrl.abort(), 15000);

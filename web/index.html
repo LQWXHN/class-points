@@ -7,9 +7,9 @@
 <title>班级积分系统</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=96">
-<link rel="stylesheet" href="/assets/apple.css?v=96">
-<link rel="stylesheet" href="/assets/page-index.css?v=96">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=97">
+<link rel="stylesheet" href="/assets/apple.css?v=97">
+<link rel="stylesheet" href="/assets/page-index.css?v=97">
 </head>
 <body>
 
@@ -64,6 +64,11 @@
     </div>
     <div class="conn-status">
       <span id="conn-dot" class="dot-on"></span><span id="conn-text">已连接</span>
+    </div>
+    <div id="saying-card" class="saying-card">
+      <div class="saying-head"><i class="fas fa-quote-left"></i><span>每日一言</span></div>
+      <div class="saying-body" id="saying-text"></div>
+      <div class="saying-more">……点击查看更多信息</div>
     </div>
   </aside>
 
@@ -130,11 +135,6 @@
           <button id="tier-help" class="icon-btn" title="段位说明"><i class="fas fa-question"></i></button>
         </div>
       </div>
-      <div id="saying-card" class="saying-card">
-        <div class="saying-head"><i class="fas fa-quote-left"></i><span>每日一言</span></div>
-        <div class="saying-body" id="saying-text"></div>
-        <div class="saying-more">……点击查看更多信息</div>
-      </div>
       <div class="segmented" style="display:flex;margin-bottom:12px">
         <button id="rk-stu" class="active" style="flex:1"><i class="fas fa-user"></i> 个人</button>
         <button id="rk-grp" style="flex:1"><i class="fas fa-users"></i> 小组</button>
@@ -147,8 +147,8 @@
   </aside>
 </div>
 
-<script src="/assets/common.js?v=96"></script>
-<script src="/assets/page-index.js?v=96"></script>
+<script src="/assets/common.js?v=97"></script>
+<script src="/assets/page-index.js?v=97"></script>
 <script>
 // v5.1: 群聊未读角标 + 预览
 async function refreshNavChat() {

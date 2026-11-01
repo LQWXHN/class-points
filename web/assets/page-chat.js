@@ -48,6 +48,18 @@
     seenImageIdx: 0,
   };
 
+  // v5.4: 跨标签单 Leader 轮询（BroadcastChannel + localStorage 心跳）
+  const SYNC_CH = 'cp-chat-sync';
+  const LS_LEADER = 'cp_chat_leader';
+  const LS_LEADER_TS = 'cp_chat_leader_ts';
+  const LEADER_TTL = 10000;
+  const LEADER_ID = (Math.random().toString(36).slice(2) + Date.now().toString(36));
+  let memberProfile = {};   // member_key → {name, avatar}（#7）
+  let jumpLock = 0;         // 跳转定位后抑制自动滚动（#12）
+  let isLeader = false;
+  let leaderPollTimer = null, heartTimer = null, watchTimer = null, bc = null;
+  const FRONT_EMOJIS = ['👦', '🏫', '🧑‍🎓', '🦊', '🐱', '🐶', '🐼', '🐯', '🦁', '🐸', '🐵', '🦄', '🌟', '🔥', '⭐', '🌈', '🎉', '🌞', '🌙'];
+
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
   const els = {
@@ -160,15 +172,35 @@
     const ctx = await CP.api('/chat/context');
     state.me = ctx.me;
     state.members = ctx.members;
+    buildMemberProfile();
     state.groupName = ctx.group_name;
     state.notice = ctx.notice;
     state.myLastReadId = ctx.my_last_read_id || 0;
     state.favorites = new Set(ctx.favorites || []);
     els.groupName.textContent = state.groupName;
     els.groupSub.textContent = state.me.name + (state.me.role === 'front' ? '（前台）' : '');
-    if (state.notice && state.notice.content) {
-      els.noticeBar.classList.add('show');
-      els.noticeBar.querySelector('.txt').textContent = '📢 ' + state.notice.content;
+    renderNoticeBar();
+  }
+
+  function buildMemberProfile() {
+    memberProfile = {};
+    (state.members || []).forEach(m => { memberProfile[m.member_key] = { name: m.name, avatar: m.avatar }; });
+  }
+
+  // 公告黄条：staff 始终可见（inactive 置灰），front 仅在有 active 公告时显示
+  function renderNoticeBar() {
+    const el = els.noticeBar;
+    el.classList.remove('show', 'inactive');
+    const n = state.notice;
+    if (!n || !n.content) { el.querySelector('.txt').textContent = ''; return; }
+    const inactive = Number(n.is_active) === 0;
+    if (inactive && !isStaff) { el.querySelector('.txt').textContent = ''; return; }
+    el.classList.add('show');
+    if (inactive) {
+      el.classList.add('inactive');
+      el.querySelector('.txt').textContent = '群公告已关闭';
+    } else {
+      el.querySelector('.txt').textContent = '📢 ' + n.content;
     }
   }
 
@@ -231,14 +263,17 @@
 
   function renderRow(m) {
     const me = state.me ? m.sender_key === state.me.member_key : false;
+    const prof = memberProfile[m.sender_key];
+    const senderName = (prof && prof.name) ? prof.name : m.sender_name;
+    const senderAvatar = (prof && prof.avatar) ? prof.avatar : m.sender_avatar;
     const row = document.createElement('div');
     if (m.recalled) {
       row.className = 'chat-row recalled-row';
-      row.innerHTML = `<div class="sys">${esc(m.sender_name)} 撤回了一条消息</div>`;
+      row.innerHTML = `<div class="sys">${esc(senderName)} 撤回了一条消息</div>`;
       return row;
     }
     row.className = 'chat-row' + (me ? ' me' : '');
-    const av = CP.avatarHTML(m.sender_avatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
+    const av = CP.avatarHTML(senderAvatar || (m.sender_key === 'front' ? '👦' : '👤'), { size: 36 });
     let inner = '';
     if (m.reply_to && m.reply && m.reply.sender_name && !m.reply.deleted) {
       const rqText = m.reply.msg_type === 'text' ? (m.reply.content || '') : (m.reply.msg_type === 'image' ? '[图片]' : '[文件]');
@@ -259,7 +294,7 @@
     row.innerHTML = `
       <span class="chat-avatar-wrap">${av}</span>
       <div class="body">
-        <div class="name">${esc(m.sender_name)}</div>
+        <div class="name">${esc(senderName)}</div>
         <div class="bubble-wrap" data-uid="${esc(m.uid)}" data-created="${m.created_at}">${inner}</div>
         <div class="msg-time">${fmtHM(m.created_at)}</div>
       </div>`;
@@ -309,12 +344,12 @@
   function bindBubbleMenu(el, m, me) {
     el.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
-      showMenu(m, me, e.clientX, e.clientY);
+      showMenu(m, me, el);
     });
     let pressTimer = null, px = 0, py = 0, moved = false;
     el.addEventListener('touchstart', e => {
       const t = e.touches[0]; px = t.clientX; py = t.clientY; moved = false;
-      pressTimer = setTimeout(() => { if (!moved) { e.preventDefault(); showMenu(m, me, px, py); } }, 500);
+      pressTimer = setTimeout(() => { if (!moved) { e.preventDefault(); showMenu(m, me, el); } }, 500);
     }, { passive: true });
     el.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
     el.addEventListener('touchmove', () => { moved = true; if (pressTimer) clearTimeout(pressTimer); });
@@ -329,6 +364,7 @@
         <button class="btn btn-sm btn-soft" id="fp-upload"><i class="fas fa-upload"></i> 上传头像</button>
         <input type="file" id="fp-file" accept="image/*" hidden>
       </div>
+      <div id="fp-emojis" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
       <div class="form-row"><label class="form-label">昵称</label>
         <input id="fp-name" class="form-input" value="${esc(me.name || '')}" maxlength="20"></div>
       <div class="modal-foot">
@@ -336,6 +372,19 @@
         <button class="btn btn-primary" data-act="ok">保存</button>
       </div>`, { size: 'sm' });
     let uploadedUrl = '';
+    let selectedEmoji = CP.resolveAvatar(me.avatar || '').img ? '' : (me.avatar || '');
+    const emojiBox = box.querySelector('#fp-emojis');
+    function renderEmojis() {
+      emojiBox.innerHTML = FRONT_EMOJIS.map(e =>
+        `<button type="button" class="fp-emoji ${e === selectedEmoji ? 'active' : ''}" data-e="${CP.esc(e)}">${e}</button>`).join('');
+      emojiBox.querySelectorAll('.fp-emoji').forEach(b => b.onclick = () => {
+        selectedEmoji = b.dataset.e;
+        uploadedUrl = ''; // emoji 与上传两态互斥
+        renderEmojis();
+        box.querySelector('#fp-avatar-preview').innerHTML = CP.avatarHTML(selectedEmoji, { size: 56 });
+      });
+    }
+    renderEmojis();
     box.querySelector('#fp-upload').onclick = () => box.querySelector('#fp-file').click();
     box.querySelector('#fp-file').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
@@ -343,6 +392,8 @@
       try {
         const r = await CP.api('/upload', { method: 'POST', body: fd });
         uploadedUrl = r.url || '';
+        selectedEmoji = '';
+        renderEmojis();
         box.querySelector('#fp-avatar-preview').innerHTML = CP.avatarHTML(uploadedUrl, { size: 56 });
       } catch (err) { CP.failToast(err, '上传失败'); }
     };
@@ -351,24 +402,26 @@
       const name = box.querySelector('#fp-name').value.trim();
       if (!name) return CP.toast('昵称不能为空', 'warn');
       try {
-        await CP.api('/chat/front-profile', { method: 'POST', body: { name, avatar: uploadedUrl || me.avatar || '' } });
-        CP.closeModal(); loadContext().catch(() => {});
+        await CP.api('/chat/front-profile', { method: 'POST', body: { name, avatar: uploadedUrl || selectedEmoji || me.avatar || '' } });
+        CP.closeModal();
+        await loadContext().catch(() => {});
+        renderMessages(true); // #7：历史消息名/头像随当前资料更新
         CP.toast('资料已更新', 'success');
       } catch (e) { CP.failToast(e, '保存失败'); }
     };
   }
 
-  function showMenu(m, me, x, y) {
+  function showMenu(m, me, trigger) {
     closeMenu();
     const menu = document.createElement('div');
     menu.id = 'chat-ctx-menu';
     const title = (CP.bootstrap && CP.bootstrap.ctx_menu_title) || '你想干嘛？';
-    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:60;min-width:140px;overflow:hidden`;
+    menu.style.cssText = 'position:fixed;left:-9999px;top:-9999px;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:60;min-width:140px;overflow:hidden';
     menu.innerHTML = `<div style="padding:10px 14px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)">${esc(title)}</div>`;
     const items = [];
     items.push(['复制', async () => { try { await navigator.clipboard.writeText(m.content || ''); CP.toast('已复制'); } catch {} }]);
     items.push(['回复', () => { state.replyTo = m; els.replyBar.classList.add('show'); els.replyTxt.textContent = `回复 ${m.sender_name}: ${(m.content||'').slice(0,30)}`; }]);
-    items.push(['收藏', () => toggleFavorite(m)]);
+    items.push([m.is_favorite ? '取消收藏' : '收藏', () => toggleFavorite(m)]);
     if (canRecall(m, me)) items.push(['撤回', () => recall(m)]);
     for (const [label, fn] of items) {
       const b = document.createElement('button');
@@ -378,6 +431,15 @@
       menu.appendChild(b);
     }
     document.body.appendChild(menu);
+    // 定位：菜单底部对齐触发元素顶部（上方 8px），空间不足则放下方；left 视口夹取
+    const rect = trigger.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.min(Math.max(rect.left, 12), vw - mw - 12);
+    let top = rect.top - mh - 8;
+    if (top < 12) top = rect.bottom + 8;
+    if (top + mh > vh - 12) top = Math.max(12, vh - mh - 12);
+    menu.style.left = left + 'px'; menu.style.top = top + 'px';
     setTimeout(() => document.addEventListener('click', closeMenu, { once: true }));
   }
   function closeMenu() { document.getElementById('chat-ctx-menu')?.remove(); }
@@ -400,40 +462,108 @@
   }
 
   async function toggleFavorite(m) {
-    if (state.favorites.has(m.uid)) {
+    const wasFav = state.favorites.has(m.uid);
+    if (wasFav) {
       await CP.api(`/chat/favorites/${m.uid}`, { method: 'DELETE' });
       state.favorites.delete(m.uid);
     } else {
       await CP.api('/chat/favorites', { method: 'POST', body: { msg_uid: m.uid } });
       state.favorites.add(m.uid);
     }
+    m.is_favorite = wasFav ? 0 : 1;
   }
 
-  // ---------- 3s 轮询（v5.2 移除 SSE） ----------
+  // ---------- 3s 轮询（v5.4：跨标签单 Leader） ----------
+  function setupChannel() {
+    if (bc || !('BroadcastChannel' in window)) return;
+    try {
+      bc = new BroadcastChannel(SYNC_CH);
+      bc.onmessage = e => {
+        const d = e.data || {};
+        if (d.type !== 'chat-sync') return;
+        if (Array.isArray(d.messages)) for (const m of d.messages) onIncoming(m);
+        if (d.notice) { state.notice = d.notice; renderNoticeBar(); }
+      };
+    } catch { bc = null; }
+  }
+  function broadcastSync(payload) {
+    if (bc) { try { bc.postMessage(Object.assign({ type: 'chat-sync' }, payload)); } catch {} }
+  }
+  function leaderActive() {
+    const cur = localStorage.getItem(LS_LEADER);
+    const ts = Number(localStorage.getItem(LS_LEADER_TS) || 0);
+    return !!(cur && (Date.now() - ts) < LEADER_TTL);
+  }
+  function tryBecomeLeader() {
+    if (leaderActive()) return false;
+    try {
+      localStorage.setItem(LS_LEADER, LEADER_ID);
+      localStorage.setItem(LS_LEADER_TS, String(Date.now()));
+      return localStorage.getItem(LS_LEADER) === LEADER_ID;
+    } catch { return false; }
+  }
+  function releaseLeader() {
+    try {
+      if (localStorage.getItem(LS_LEADER) === LEADER_ID) {
+        localStorage.removeItem(LS_LEADER);
+        localStorage.removeItem(LS_LEADER_TS);
+      }
+    } catch {}
+  }
+  function startLeader() {
+    if (isLeader) return;
+    isLeader = true;
+    pollNew();
+    leaderPollTimer = setInterval(pollNew, 3000);
+    heartTimer = setInterval(() => {
+      if (document.hidden) return; // 隐藏时不续心跳，可见标签 10s 内接管
+      try { localStorage.setItem(LS_LEADER_TS, String(Date.now())); } catch {}
+    }, 3000);
+  }
+  function stopLeader() {
+    if (!isLeader) return;
+    isLeader = false;
+    clearInterval(leaderPollTimer); leaderPollTimer = null;
+    clearInterval(heartTimer); heartTimer = null;
+  }
+  function watchTick() {
+    if (isLeader || document.hidden) return;
+    if (!leaderActive() && tryBecomeLeader()) startLeader();
+  }
   function startPoll() {
     if (state.pollTimer) return;
-    state.pollTimer = setInterval(pollNew, 3000);
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { clearInterval(state.pollTimer); state.pollTimer = null; }
-      else if (!state.pollTimer) state.pollTimer = setInterval(pollNew, 3000);
-    });
+    state.pollTimer = 1;
+    setupChannel();
+    if (tryBecomeLeader()) startLeader();
+    watchTimer = setInterval(watchTick, 3000);
+    window.addEventListener('pagehide', () => { if (isLeader) releaseLeader(); });
   }
 
   async function pollNew() {
     if (document.hidden) return;
+    // 消息轮询：10s 超时，挂起请求不阻塞下一周期
+    const c1 = new AbortController();
+    const t1 = setTimeout(() => c1.abort(), 10000);
     try {
-      const r = await CP.api(`/chat/new?after=${state.lastId}`, { handle401: false });
+      const r = await CP.api(`/chat/new?after=${state.lastId}`, { handle401: false, signal: c1.signal });
       if (r.messages && r.messages.length) {
         for (const m of r.messages) onIncoming(m);
+        broadcastSync({ messages: r.messages });
       }
-    } catch {}
+    } catch {} finally { clearTimeout(t1); }
+    const c2 = new AbortController();
+    const t2 = setTimeout(() => c2.abort(), 10000);
     try {
-      const nc = await CP.api('/chat/notice', { handle401: false });
+      const nc = await CP.api('/chat/notice', { handle401: false, signal: c2.signal });
       const d = (nc && nc.data) ? nc.data : nc;
       const notice = d && d.notice ? d.notice : d;
-      const cur = state.notice && state.notice.content;
-      if (notice && notice.content !== cur) { state.notice = notice; loadContext().catch(() => {}); }
-    } catch {}
+      const cur = state.notice;
+      if (notice && (!cur || notice.uid !== cur.uid || Number(notice.is_active) !== Number(cur.is_active) || notice.content !== cur.content)) {
+        state.notice = notice;
+        renderNoticeBar();
+        broadcastSync({ notice });
+      }
+    } catch {} finally { clearTimeout(t2); }
   }
 
   function onIncoming(m) {
@@ -445,7 +575,12 @@
     state.messages.push(m);
     if (m.id > state.lastId) state.lastId = m.id;
     renderMessages(true);
-    scrollToBottom();
+    // 仅视图近底部（≤80px）或本人消息才滚动；跳转定位后 3s 内抑制（#12）
+    if (Date.now() > jumpLock) {
+      const nearBottom = els.scroll.scrollHeight - els.scroll.scrollTop - els.scroll.clientHeight <= 80;
+      const mine = state.me && m.sender_key === state.me.member_key;
+      if (nearBottom || mine) scrollToBottom();
+    }
     // 新消息实时渲染即可（v5.0 通知统一走 WxPusher 客户端，浏览器不做 toast/提示音）
     // 自动上报已读
     if (m.id > state.myLastReadId) {
@@ -609,20 +744,33 @@
     els.replyCancel.onclick = () => { state.replyTo = null; els.replyBar.classList.remove('show'); };
     els.faceBtn.onclick = () => {
       const willShow = !els.facePanel.classList.contains('show');
-      if (willShow) ensureFaceGrid();
+      if (willShow) { ensureFaceGrid(); positionFacePanel(); }
       els.facePanel.classList.toggle('show');
     };
     els.noticeBar.onclick = () => {
-      if (!state.notice) return;
+      if (!state.notice || !state.notice.content) return;
       const canEdit = state.me.role !== 'front';
+      const n = state.notice;
+      const inactive = Number(n.is_active) === 0;
       CP.modal(`<h3>群公告</h3>
-        <p style="white-space:pre-wrap;color:var(--text-2)">${esc(state.notice.content)}</p>
-        ${canEdit ? `<textarea id="chat-notice-input" class="form-input" rows="3" placeholder="编辑群公告" style="margin-top:8px">${esc(state.notice.content)}</textarea>` : ''}
+        <p style="white-space:pre-wrap;color:var(--text-2)">${esc(n.content)}</p>
+        ${canEdit ? `<textarea id="chat-notice-input" class="form-input" rows="3" placeholder="编辑群公告" style="margin-top:8px">${esc(n.content)}</textarea>` : ''}
         <div class="modal-foot">
           <button class="btn" onclick="CP.closeModal()">关闭</button>
+          ${canEdit ? `<button class="btn btn-soft" id="chat-notice-toggle">${inactive ? '开启公告' : '关闭公告'}</button>` : ''}
           ${canEdit ? `<button class="btn btn-primary" id="chat-notice-save">保存</button>` : ''}
         </div>`, { size: 'sm',
         onShow: (box) => {
+          const tb = box.querySelector('#chat-notice-toggle');
+          if (tb) tb.onclick = async () => {
+            const target = inactive ? 1 : 0;
+            try {
+              await CP.api(`/chat/notice/${n.uid}/toggle`, { method: 'POST', body: { is_active: target } });
+              CP.closeModal();
+              await loadContext().catch(() => {});
+              CP.toast(target ? '公告已开启' : '公告已关闭', 'success');
+            } catch (e) { CP.toast(e.message || '操作失败', 'error'); }
+          };
           const b = box.querySelector('#chat-notice-save');
           if (b) b.onclick = async () => {
             const v = box.querySelector('#chat-notice-input').value;
@@ -709,7 +857,7 @@
         </div>`;
       }).join('') : '<p style="color:var(--chat-text-2)">暂无收藏</p>';
       els.panelBody.querySelectorAll('.chat-search-result').forEach(el => {
-        el.onclick = () => jumpToId(Number(el.dataset.id));
+        el.onclick = () => jumpToId(el.dataset.uid, Number(el.dataset.id));
       });
     } catch (e) { els.panelBody.innerHTML = '<p>加载失败</p>'; }
   }
@@ -730,27 +878,34 @@
             const textPreview = m.msg_type === 'image' ? '[图片]'
               : m.msg_type === 'file' ? '[文件] ' + ((m.attachments && m.attachments[0] && m.attachments[0].name) || '')
               : (m.content || '').slice(0, 80);
-            return `<div class="chat-search-result" data-id="${m.id}">
+            return `<div class="chat-search-result" data-uid="${m.uid}" data-id="${m.id}">
               <div style="font-weight:600">${esc(m.sender_name)}</div>
               <div style="color:var(--chat-text-2);font-size:13px">${esc(textPreview)}</div>
             </div>`;
           }).join('') : '<p style="color:var(--chat-text-2)">无结果</p>';
           box.querySelectorAll('.chat-search-result').forEach(el => {
-            el.onclick = () => jumpToId(Number(el.dataset.id));
+            el.onclick = () => jumpToId(el.dataset.uid, Number(el.dataset.id));
           });
         } catch {}
       }, 300);
     });
   }
-  async function jumpToId(id) {
-    // 拉取该 id 附近消息
+  async function jumpToId(uid, id) {
+    // 拉取该 id 附近消息，定位 [data-uid] 行并高亮
     try {
       const r = await CP.api(`/chat/messages?before=${id + 1}&limit=50`);
       state.messages = r.messages;
       if (state.messages.length) state.lastId = state.messages[state.messages.length - 1].id;
       renderMessages(false);
       closeChatPanel();
-      scrollToBottom();
+      jumpLock = Date.now() + 3000; // 抑制 onIncoming 自动滚动
+      const safe = (window.CSS && CSS.escape) ? CSS.escape(String(uid)) : String(uid).replace(/"/g, '\\"');
+      const target = els.scroll.querySelector(`[data-uid="${safe}"]`);
+      if (target) {
+        target.classList.add('jump-highlight');
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setTimeout(() => target.classList.remove('jump-highlight'), 2500);
+      }
     } catch {}
   }
 
@@ -841,6 +996,20 @@
         renderMessages(true); scrollToBottom();
       }
     } catch (e) { CP.toast(e.message || '发送失败', 'error'); }
+  }
+  // 表情面板定位：锚定 #chat-face 上方，视口夹取、四周留边距
+  function positionFacePanel() {
+    const pw = 320, ph = 320;
+    const r = els.faceBtn.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = r.left + r.width / 2 - pw / 2;
+    left = Math.min(Math.max(left, 12), vw - pw - 12);
+    let top = r.top - ph - 8;
+    if (top < 12) top = r.bottom + 8;
+    if (top + ph > vh - 12) top = Math.max(12, vh - ph - 12);
+    els.facePanel.style.left = left + 'px';
+    els.facePanel.style.top = top + 'px';
+    els.facePanel.style.right = 'auto';
   }
   function ensureFaceGrid() {
     if (!faceBuilt) return;

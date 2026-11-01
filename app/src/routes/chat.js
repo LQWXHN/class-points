@@ -65,11 +65,27 @@ async function listMembers(db) {
   return members;
 }
 
-async function latestNotice(db) {
+// v5.4: includeInactive=true（staff）取最新一条（含关闭）；false（front）只取 is_active=1
+async function latestNotice(db, includeInactive = false) {
+  if (includeInactive) {
+    const row = await db.get(
+      'SELECT * FROM chat_notices WHERE deleted=0 ORDER BY id DESC LIMIT 1'
+    );
+    return row || null;
+  }
   const row = await db.get(
-    "SELECT * FROM chat_notices WHERE deleted=0 ORDER BY id DESC LIMIT 1"
+    'SELECT * FROM chat_notices WHERE deleted=0 AND is_active=1 ORDER BY id DESC LIMIT 1'
   );
   return row || null;
+}
+
+function shapeNotice(row) {
+  if (!row) return null;
+  return {
+    uid: row.uid, content: row.content, author: row.author,
+    created_at: row.created_at, updated_at: row.updated_at,
+    is_active: row.is_active != null ? (row.is_active ? 1 : 0) : 1,
+  };
 }
 
 async function shapeMsg(db, m, favoriteSet) {
@@ -107,17 +123,14 @@ export function chatRoutes() {
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
     const db = c.get('db');
     const members = await listMembers(db);
-    const notice = await latestNotice(db);
+    const notice = await latestNotice(db, !!me.is_staff);
     const groupName = (await getConfig(db, 'chat_group_name')) || '二班群';
     const myRead = await db.get('SELECT * FROM chat_reads WHERE member_key=?', me.member_key);
     const favRows = await db.all('SELECT msg_uid FROM chat_favorites WHERE member_key=?', me.member_key);
     return c.json({
       ok: true,
       group_name: groupName,
-      notice: notice ? {
-        uid: notice.uid, content: notice.content, author: notice.author,
-        created_at: notice.created_at, updated_at: notice.updated_at,
-      } : null,
+      notice: shapeNotice(notice),
       members,
       me: { member_key: me.member_key, name: me.name, avatar: me.avatar, role: me.role },
       my_last_read_id: myRead ? myRead.last_read_id : 0,
@@ -332,11 +345,8 @@ export function chatRoutes() {
   app.get('/chat/notice', async (c) => {
     const me = await authChat(c);
     if (!me) return c.json({ ok: false, error: '未登录' }, 401);
-    const row = await latestNotice(c.get('db'));
-    return c.json({ ok: true, notice: row ? {
-      uid: row.uid, content: row.content, author: row.author,
-      created_at: row.created_at, updated_at: row.updated_at,
-    } : null });
+    const row = await latestNotice(c.get('db'), !!me.is_staff);
+    return c.json({ ok: true, notice: shapeNotice(row) });
   });
   app.post('/chat/notice', async (c) => {
     const me = await authChat(c);
@@ -348,18 +358,39 @@ export function chatRoutes() {
     const t = now();
     const nUid = uid();
     await db.run(
-      'INSERT INTO chat_notices (uid, content, author, created_at, updated_at, deleted) VALUES (?,?,?,?,?,0)',
+      'INSERT INTO chat_notices (uid, content, author, is_active, created_at, updated_at, deleted) VALUES (?,?,?,1,?,?,0)',
       nUid, content, me.name, t, t
     );
     await writeSyncEvent(db, {
       tbl: 'chat_notices', row_uid: nUid, op: 'upsert',
-      snapshot: { uid: nUid, content, author: me.name, created_at: t, updated_at: t, deleted: 0 },
+      snapshot: { uid: nUid, content, author: me.name, is_active: 1, created_at: t, updated_at: t, deleted: 0 },
     });
     const { pickPublicOnline } = await import('../sites-health.js');
     const origin = pickPublicOnline() || (c.req.header('Origin') || '');
     const { pushNotice } = await import('../push/wxpusher.js');
     pushNotice(db, me.name, content, me.member_key, { origin }).catch(e => console.error('[wxpush notice]', e.message));
-    return c.json({ ok: true, notice: { uid: nUid, content, author: me.name, created_at: t } });
+    return c.json({ ok: true, notice: { uid: nUid, content, author: me.name, is_active: 1, created_at: t } });
+  });
+
+  // v5.4: 开启/关闭群公告（staff；不触发 WxPusher，仅创建时推送）
+  app.post('/chat/notice/:uid/toggle', async (c) => {
+    const me = await authChat(c);
+    if (!me) return c.json({ ok: false, error: '未登录' }, 401);
+    if (!me.is_staff) return c.json({ ok: false, error: '仅老师可操作公告' }, 403);
+    const db = c.get('db');
+    const body = await c.req.json().catch(() => ({}));
+    const nUid = c.req.param('uid');
+    const row = await db.get('SELECT * FROM chat_notices WHERE uid=? AND deleted=0', nUid);
+    if (!row) return c.json({ ok: false, error: '公告不存在' }, 404);
+    const isActive = body.is_active ? 1 : 0;
+    const t = now();
+    await db.run('UPDATE chat_notices SET is_active=?, updated_at=? WHERE uid=?', isActive, t, nUid);
+    // snapshot 含整行 + is_active
+    await writeSyncEvent(db, {
+      tbl: 'chat_notices', row_uid: nUid, op: 'upsert',
+      snapshot: { ...row, is_active: isActive, updated_at: t },
+    });
+    return c.json({ ok: true });
   });
 
   app.get('/admin/sites-health', async (c) => {

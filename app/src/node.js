@@ -44,6 +44,7 @@ await migrateV47(db);
 await migrateV48(db);
 await migrateV49(db);
 await migrateV50(db);
+await migrateV54(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -275,6 +276,32 @@ async function migrateV50(db) {
   await db.run("UPDATE admin_config SET value='v5.1（2026-10-25）' WHERE key='system_version'");
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v5.1（2026-10-25）');
+}
+
+// v5.4 幂等迁移：point_rules.category / chat_notices.is_active 补列 + point_categories 默认配置
+// （不覆盖 system_version，版本号由后台设置项管理）
+async function migrateV54(db) {
+  const prCols = await db.all('PRAGMA table_info(point_rules)');
+  const prNames = new Set((prCols || []).map(c => c.name));
+  if (!prNames.has('category')) {
+    await db.run("ALTER TABLE point_rules ADD COLUMN category TEXT NOT NULL DEFAULT '常规'");
+  }
+
+  const cnCols = await db.all('PRAGMA table_info(chat_notices)');
+  const cnNames = new Set((cnCols || []).map(c => c.name));
+  if (!cnNames.has('is_active')) {
+    await db.run('ALTER TABLE chat_notices ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+  }
+
+  // 兜底：v5.2 拟造列（旧库若未跑 migrate-v52.sql 则在此自愈）
+  const precCols = await db.all('PRAGMA table_info(point_records)');
+  const precNames = new Set((precCols || []).map(c => c.name));
+  if (!precNames.has('fabricated')) {
+    await db.run('ALTER TABLE point_records ADD COLUMN fabricated INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const pcRow = await db.get('SELECT key FROM admin_config WHERE key=?', 'point_categories');
+  if (!pcRow) await setConfig(db, 'point_categories', JSON.stringify(['常规']));
 }
 
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed

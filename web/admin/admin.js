@@ -22,6 +22,7 @@
     studentSearch: '', studentBatch: false, studentSel: new Set(),
     groupBatch: false, groupSel: new Set(),
     ruleSelAdd: new Set(), ruleSelSub: new Set(),
+    rulesTab: 'rules',
     rankTab: 'individual',
     annCat: '全部', annEditingId: null,
     annView: 'home', annRange: 'week', annPub: '', annYear: 0, annMonth: 0, annDay: 0,
@@ -305,9 +306,9 @@
   }
   function navClick(page, isExt) {
     if (page === 'records') {
-      // 超管进入后台历史记录页（含拟造加减分、拟造角标）；其余角色沿用前台统一记录页
-      if (currentUser.role === 'super') { switchPage('records'); return; }
-      location.href = '/history?from=admin'; return;
+      // 超管与班主任统一进入前台历史记录页（超管带拟造入口）；不再渲染后台表格页
+      location.href = '/history?from=admin' + (currentUser.role === 'super' ? '&fabricate=1' : '');
+      return;
     }
     if (page === 'chat') { location.href = (currentUser.role === 'super') ? '/chat/admin' : '/chat/teacher'; return; }
     switchPage(page);
@@ -777,7 +778,37 @@
   /* ============================================================
      积分规则
      ============================================================ */
-  function renderRulesPage() {
+  let _ruleCats = null; // 分类缓存；null 表示尚未加载
+  function unionRuleCats() {
+    const out = [];
+    const push = c => { c = String(c == null ? '' : c).trim(); if (c && !out.includes(c)) out.push(c); };
+    try { const cfg = appData.config.point_categories; if (Array.isArray(cfg)) cfg.forEach(push); } catch (e) {}
+    (appData.rules || []).forEach(r => push(r.category));
+    return out.length ? out : ['常规'];
+  }
+  async function loadRuleCats() {
+    try {
+      const r = await CP.api('/rules/categories');
+      if (r && r.ok && Array.isArray(r.data)) { _ruleCats = r.data.slice(); return _ruleCats; }
+    } catch (e) {}
+    if (!_ruleCats) _ruleCats = unionRuleCats();
+    return _ruleCats;
+  }
+  function catOptions(selected) {
+    const cats = ((_ruleCats && _ruleCats.length) ? _ruleCats : unionRuleCats()).slice();
+    const sel = selected || '常规';
+    if (!cats.includes(sel)) cats.unshift(sel);
+    return cats.map(c => `<option value="${CP.esc(c)}" ${c === sel ? 'selected' : ''}>${CP.esc(c)}</option>`).join('');
+  }
+  function rulesTabsHtml(active) {
+    const tabBtn = (key, label) => `<button class="btn btn-sm" onclick="App.rulesTab('${key}')" style="${key === active ? 'background:var(--primary);color:#fff;font-weight:600' : 'background:var(--fill);color:var(--text-2)'}">${label}</button>`;
+    return `<div style="display:flex;gap:8px;margin-bottom:16px">${tabBtn('rules', '编辑规则')}${tabBtn('categories', '编辑分类标签')}</div>`;
+  }
+  function rulesTab(key) { uiState.rulesTab = key; renderRulesPage(); }
+
+  async function renderRulesPage() {
+    if (uiState.rulesTab === 'categories') { await renderRuleCatsPage(); return; }
+    if (!_ruleCats) loadRuleCats(); // 后台预热分类，供弹窗选用
     const addR = appData.rules.filter(r => r.type === 'add');
     const subR = appData.rules.filter(r => r.type === 'sub');
     const renderList = (list, type) => {
@@ -792,7 +823,7 @@
           ${builtin ? 'style="opacity:.6"' : ''}>
           <i class="fas fa-grip-vertical" style="color:var(--text-3);margin-right:2px;cursor:grab;font-size:12px"></i>
           <input type="checkbox" style="width:16px;height:16px;flex:none" ${builtin || !selSet ? 'disabled' : (selSet.has(r.id) ? 'checked' : '')} onchange="App.toggleRuleSel('${type}',${r.id},this.checked)">
-          <div class="rule-reason">${CP.esc(r.reason)} ${builtin ? '<span class="badge" style="font-size:10px;background:var(--fill);color:var(--text-3)">内置</span>' : ''}</div>
+          <div class="rule-reason">${CP.esc(r.reason)} <span style="font-size:11px;padding:1px 8px;border-radius:99px;background:var(--fill);color:var(--text-2)">${CP.esc(r.category || '常规')}</span> ${builtin ? '<span class="badge" style="font-size:10px;background:var(--fill);color:var(--text-3)">内置</span>' : ''}</div>
           <div class="rule-pts ${type}">${pts}</div>
           <button class="icon-btn" style="color:var(--blue);${builtin ? 'pointer-events:none;opacity:.4' : ''}" ${builtin ? 'title="内置规则不可修改"' : 'title="编辑规则"'} onclick="App.showEditRule(${r.id},'${type}')"><i class="fas fa-pen"></i></button>
           <button class="icon-btn" style="color:var(--red);${builtin ? 'pointer-events:none;opacity:.4' : ''}" ${builtin ? 'title="内置规则不可修改"' : ''} onclick="App.doDelRule(${r.id})"><i class="fas fa-trash"></i></button>
@@ -802,6 +833,7 @@
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header"><h2 class="page-title" style="margin:0">积分规则</h2></div>
+      ${rulesTabsHtml('rules')}
       <div class="rules-grid">
         <div>
           <div class="flex aic gap-6 mb-8 wrap" style="margin-bottom:10px">
@@ -825,6 +857,72 @@
         </div>
       </div>
     </div>`;
+  }
+
+  async function renderRuleCatsPage() {
+    const cats = await loadRuleCats();
+    const rows = cats.map((c, i) => `
+      <div class="rule-row">
+        <span class="flex1" style="font-size:14px">${CP.esc(c)}</span>
+        <button class="icon-btn" style="color:var(--blue)" onclick="App.renameRuleCat(${i})"><i class="fas fa-pen"></i></button>
+        <button class="icon-btn" style="color:var(--red)" onclick="App.delRuleCat(${i})"><i class="fas fa-trash"></i></button>
+      </div>`).join('');
+    $('main-content').innerHTML = `
+    <div class="card page-card fade-in">
+      <div class="page-header"><h2 class="page-title" style="margin:0">分类标签</h2></div>
+      ${rulesTabsHtml('categories')}
+      <div class="flex aic gap-6" style="margin-bottom:12px">
+        <input id="cat-new" class="form-input" style="flex:1" maxlength="20" placeholder="新分类名称（20 字以内）">
+        <button class="btn btn-primary btn-sm" onclick="App.addRuleCat()"><i class="fas fa-plus"></i> 新增</button>
+      </div>
+      ${cats.length ? `<div class="rule-list">${rows}</div>` : '<div class="empty"><i class="fas fa-inbox"></i><p>暂无分类</p></div>'}
+    </div>`;
+  }
+  async function saveRuleCats(cats) {
+    try {
+      const r = await CP.api('/rules/categories', { method: 'POST', body: { categories: cats } });
+      _ruleCats = (r && r.ok && Array.isArray(r.data)) ? r.data.slice() : cats.slice();
+      CP.toast('已保存', 'success');
+      renderRulesPage();
+    } catch (e) { CP.failToast(e, '保存失败'); }
+  }
+  async function addRuleCat() {
+    const inp = $('cat-new');
+    const name = inp ? inp.value.trim() : '';
+    if (!name) return CP.toast('请输入分类名称', 'warn');
+    if (name.length > 20) return CP.toast('分类名称不能超过 20 字', 'warn');
+    const cats = (_ruleCats || unionRuleCats()).slice();
+    if (cats.includes(name)) return CP.toast('分类已存在', 'warn');
+    cats.push(name);
+    await saveRuleCats(cats);
+  }
+  function renameRuleCat(i) {
+    const cats = _ruleCats || unionRuleCats();
+    if (cats[i] == null) return;
+    CP.modal(`<h3>重命名分类</h3>
+      <div class="form-row"><label class="form-label">新名称</label><input id="cat-rename" class="form-input" value="${CP.esc(cats[i])}" maxlength="20"></div>
+      <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doRenameRuleCat(${i})">保存</button></div>`, { size: 'sm' });
+  }
+  async function doRenameRuleCat(i) {
+    const name = $('cat-rename').value.trim();
+    if (!name) return CP.toast('请输入分类名称', 'warn');
+    if (name.length > 20) return CP.toast('分类名称不能超过 20 字', 'warn');
+    const cats = (_ruleCats || unionRuleCats()).slice();
+    if (cats[i] == null) { CP.closeModal(); return; }
+    if (name === cats[i]) { CP.closeModal(); return; }
+    if (cats.includes(name)) return CP.toast('分类已存在', 'warn');
+    cats[i] = name;
+    CP.closeModal();
+    await saveRuleCats(cats);
+  }
+  async function delRuleCat(i) {
+    const cats = _ruleCats || unionRuleCats();
+    const name = cats[i];
+    if (name == null) return;
+    const ok = await CP.confirm('删除分类', `确定删除分类「${name}」吗？其下规则将保留原分类。`);
+    if (!ok) return;
+    cats.splice(i, 1);
+    await saveRuleCats(cats);
   }
   function toggleRuleSel(type, id, checked) { const s = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub; if (checked) s.add(id); else s.delete(id); }
 
@@ -895,6 +993,7 @@
     CP.modal(`<h3>新增${type === 'add' ? '加分' : '减分'}规则</h3>
       <div class="form-row"><label class="form-label">原因</label><input id="ar-reason" class="form-input"></div>
       <div class="form-row"><label class="form-label">积分值</label><input id="ar-points" type="number" class="form-input" value="${type === 'add' ? 10 : 5}" min="1"></div>
+      <div class="form-row"><label class="form-label">分类</label><select id="ar-category" class="form-input">${catOptions('常规')}</select></div>
       <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doAddRule('${type}')">添加</button></div>`);
   }
   async function doAddRule(type) {
@@ -902,7 +1001,8 @@
     let points = Math.abs(parseInt($('ar-points').value) || 0);
     if (!reason) return CP.toast('请输入原因', 'warn');
     if (points <= 0) return CP.toast('积分值必须为正整数', 'warn');
-    try { await CP.api('/rules', { method: 'POST', body: { type, reason, points } }); CP.toast('添加成功', 'success'); CP.closeModal(); switchPage('rules'); }
+    const category = ($('ar-category') ? $('ar-category').value : '').trim() || '常规';
+    try { await CP.api('/rules', { method: 'POST', body: { type, reason, points, category } }); CP.toast('添加成功', 'success'); CP.closeModal(); switchPage('rules'); }
     catch (e) { CP.failToast(e, '添加失败'); }
   }
   function showEditRule(id, type) {
@@ -912,6 +1012,7 @@
     CP.modal(`<h3>编辑${type === 'add' ? '加分' : '减分'}规则</h3>
       <div class="form-row"><label class="form-label">原因</label><input id="er-reason" class="form-input" value="${CP.esc(r.reason)}"></div>
       <div class="form-row"><label class="form-label">积分值（正整数）</label><input id="er-points" type="number" class="form-input" value="${Math.abs(r.points)}" min="1"></div>
+      <div class="form-row"><label class="form-label">分类</label><select id="er-category" class="form-input">${catOptions(r.category || '常规')}</select></div>
       <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doEditRule(${id},'${type}')">保存</button></div>`);
   }
   async function doEditRule(id, type) {
@@ -921,8 +1022,9 @@
     let points = Math.abs(parseInt($('er-points').value) || 0);
     if (!reason) return CP.toast('请输入原因', 'warn');
     if (points <= 0) return CP.toast('积分值必须为正整数', 'warn');
+    const category = ($('er-category') ? $('er-category').value : '').trim() || '常规';
     try {
-      await CP.api(`/rules/${id}`, { method: 'PUT', body: { reason, points, type } });
+      await CP.api(`/rules/${id}`, { method: 'PUT', body: { reason, points, type, category } });
       CP.toast('已保存', 'success'); CP.closeModal(); switchPage('rules');
     } catch (e) { CP.failToast(e, '保存失败'); }
   }
@@ -1646,6 +1748,7 @@
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_leaderboard === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_leaderboard',this.checked)"><span class="slider"></span></label><span>个人排行榜显示头像框</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_cards === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_cards',this.checked)"><span class="slider"></span></label><span>学生卡片显示头像框</span></div>
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.avatar_frame_tier === '1' ? 'checked' : ''} onchange="App.saveCfg('avatar_frame_tier',this.checked)"><span class="slider"></span></label><span>段位排行榜显示头像框</span></div>
+      ${isSuper ? `
       <div class="switch-row"><label class="switch"><input type="checkbox" ${appData.config.modal_blur_enabled !== '0' ? 'checked' : ''} onchange="App.saveCfg('modal_blur_enabled',this.checked)"><span class="slider"></span></label><span>弹窗背景模糊（低配设备可关闭）</span></div>
 
       <h3 class="sec-t mt-20">前台体验</h3>
@@ -1661,6 +1764,7 @@
       <div class="form-row"><label class="form-label">版本信息</label>
         <input id="set-system-version" class="form-input" value="${CP.esc(appData.config.system_version || 'v4.4（2026-10-15）')}"></div>
       <button class="btn btn-primary" onclick="App.saveSysInfo()"><i class="fas fa-save"></i> 保存系统信息</button>
+      ` : ''}
 
       ${isSuper ? `
       <h3 class="sec-t mt-20">邮件通知（Resend）</h3>
@@ -1675,7 +1779,6 @@
       ` : ''}
 
       <h3 class="sec-t mt-20">群聊与通知（WxPusher）</h3>
-      <p class="text-3" style="font-size:12px;margin:0 0 10px">新消息通过 WxPusher 推送到微信/Windows 客户端；三个成员（前台大屏 / 班主任 / 超管）分别绑定自己的 UID 即可收到。</p>
       <div class="form-row"><label class="form-label">群名</label>
         <input id="wxp-group-name" class="form-input" value="${CP.esc(appData.config.chat_group_name || '二班群')}"></div>
       ${isSuper ? `
@@ -2847,6 +2950,7 @@
     showImportGroups, doImportGroups,
     toggleRuleSel, batchDelRules, showAddRule, doAddRule, showEditRule, doEditRule, showBatchAddRule, doBatchAddRule, doDelRule,
     dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
+    rulesTab, addRuleCat, renameRuleCat, doRenameRuleCat, delRuleCat,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,
     switchRankTab,

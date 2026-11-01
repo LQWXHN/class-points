@@ -109,13 +109,13 @@ async function applyUpsert(db, ev, table, opts = {}) {
 
   if (table === 'point_rules') {
     if (local) {
-      await db.run(`UPDATE point_rules SET type=?, reason=?, points=?, is_custom=?, is_builtin=?, sort_order=?, updated_at=?, deleted=0 WHERE uid=?`,
+      await db.run(`UPDATE point_rules SET type=?, reason=?, points=?, is_custom=?, is_builtin=?, sort_order=?, category=?, updated_at=?, deleted=0 WHERE uid=?`,
         snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1, snap.is_builtin ?? 0,
-        snap.sort_order ?? 0, snap.updated_at || Date.now(), keyVal);
+        snap.sort_order ?? 0, snap.category || '常规', snap.updated_at || Date.now(), keyVal);
     } else {
-      await db.run(`INSERT INTO point_rules (uid, type, reason, points, is_custom, is_builtin, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+      await db.run(`INSERT INTO point_rules (uid, type, reason, points, is_custom, is_builtin, sort_order, category, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
         keyVal, snap.type, snap.reason, snap.points || 0, snap.is_custom ?? 1, snap.is_builtin ?? 0,
-        snap.sort_order ?? 0, snap.created_at || Date.now(), snap.updated_at || Date.now());
+        snap.sort_order ?? 0, snap.category || '常规', snap.created_at || Date.now(), snap.updated_at || Date.now());
     }
     return;
   }
@@ -415,12 +415,15 @@ async function applyUpsert(db, ev, table, opts = {}) {
     }
     if (local) {
       await db.run(
-        'UPDATE chat_notices SET content=?, author=?, updated_at=?, deleted=0 WHERE uid=?',
-        snap.content || '', snap.author || '', snap.updated_at || Date.now(), keyVal);
+        'UPDATE chat_notices SET content=?, author=?, is_active=?, updated_at=?, deleted=0 WHERE uid=?',
+        snap.content || '', snap.author || '',
+        snap.is_active != null ? (snap.is_active ? 1 : 0) : 1,
+        snap.updated_at || Date.now(), keyVal);
     } else {
       await db.run(
-        'INSERT INTO chat_notices (uid, content, author, created_at, updated_at, deleted) VALUES (?,?,?,?,?,0)',
+        'INSERT INTO chat_notices (uid, content, author, is_active, created_at, updated_at, deleted) VALUES (?,?,?,?,?,?,0)',
         keyVal, snap.content || '', snap.author || '',
+        snap.is_active != null ? (snap.is_active ? 1 : 0) : 1,
         snap.created_at || Date.now(), snap.updated_at || Date.now());
     }
     return;

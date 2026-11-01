@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS point_rules (
   points     INTEGER NOT NULL,
   is_custom  INTEGER NOT NULL DEFAULT 1,
   is_builtin INTEGER NOT NULL DEFAULT 0, -- v4.4: 1=内置自定义规则（不可改删）
+  sort_order INTEGER NOT NULL DEFAULT 0, -- v4.8: 规则拖拽排序
+  category   TEXT NOT NULL DEFAULT '常规', -- v5.4: 规则分类
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted    INTEGER NOT NULL DEFAULT 0
@@ -153,6 +155,7 @@ CREATE TABLE IF NOT EXISTS point_records (
   operator     TEXT NOT NULL DEFAULT 'system',
   apply        INTEGER NOT NULL DEFAULT 1,
   hidden       INTEGER NOT NULL DEFAULT 0, -- v4.4: 1=超管直改隐藏流水（学生端不可见，双周榜计入）
+  fabricated   INTEGER NOT NULL DEFAULT 0, -- v5.2: 1=拟造记录（不关联真实操作）
   created_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pr_uid ON point_records(student_uid);
@@ -301,6 +304,7 @@ VALUES ('u-teacher-seed', 'teacher', 'teacher', '班主任', 0, 0);
 INSERT OR IGNORE INTO admin_users (uid, username, role, display_name, created_at, updated_at)
 VALUES ('u-admin-seed', 'admin', 'super', '超级管理员', 0, 0);
 INSERT OR IGNORE INTO admin_config (key, value, updated_at) VALUES ('site_title', '班级积分系统', 0);
+INSERT OR IGNORE INTO admin_config (key, value, updated_at) VALUES ('point_categories', '["常规"]', 0);
 
 -- 系统级公告（面向所有设备/端的置顶通知，独立于班级动态 announcements）
 CREATE TABLE IF NOT EXISTS system_announcements (
@@ -375,6 +379,7 @@ CREATE TABLE IF NOT EXISTS chat_notices (
   uid          TEXT NOT NULL UNIQUE,
   content      TEXT NOT NULL,
   author       TEXT NOT NULL,
+  is_active    INTEGER NOT NULL DEFAULT 1, -- v5.4: 1=开启 0=关闭
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL DEFAULT 0,
   deleted      INTEGER NOT NULL DEFAULT 0

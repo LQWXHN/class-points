@@ -3,11 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<script>
+(function () {
+  var has = false;
+  try { has = !!localStorage.getItem('admin_token'); } catch (e) {}
+  if (has) document.documentElement.classList.add('has-session');
+  window.addEventListener('pageshow', function () {
+    var t = false;
+    try { t = !!localStorage.getItem('admin_token'); } catch (e) {}
+    if (!t) return;
+    document.documentElement.classList.add('has-session');
+    var ls = document.getElementById('login-screen');
+    var ap = document.getElementById('admin-app');
+    if (ls) ls.style.display = 'none';
+    if (ap) ap.style.display = 'grid';
+  });
+})();
+</script>
+<style>html.has-session #login-screen { display: none; }</style>
 <title>班级积分系统 · 后台</title>
 <link rel="preload" href="/assets/vendor/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=96">
-<link rel="stylesheet" href="/assets/apple.css?v=96">
-<link rel="stylesheet" href="/admin/admin.css?v=96">
+<link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css?v=97">
+<link rel="stylesheet" href="/assets/apple.css?v=97">
+<link rel="stylesheet" href="/admin/admin.css?v=97">
 </head>
 <body>
 
@@ -116,7 +134,7 @@
   <main class="admin-main" id="main-content"></main>
 </div>
 
-<script src="/assets/common.js?v=96"></script>
-<script src="/admin/admin.js?v=96"></script>
+<script src="/assets/common.js?v=97"></script>
+<script src="/admin/admin.js?v=97"></script>
 </body>
 </html>
