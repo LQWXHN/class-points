@@ -2,7 +2,8 @@
 import { createWorkerDb } from './db/worker-db.js';
 import { createR2Storage } from './storage/r2-storage.js';
 import { createApp } from './app.js';
-import { setSyncOrigin, getConfig } from './routes/_helpers.js';
+import { setSyncOrigin } from './routes/_helpers.js';
+import { runAutoBackupIfDue } from './routes/backup.js';
 import { runWorkerTick } from './sync/worker-tick.js';
 
 const PAGE_REWRITES = {
@@ -164,17 +165,10 @@ export default {
         await db.run("INSERT OR REPLACE INTO kv_meta (key, value) VALUES ('sync_last_error', ?)", e.message);
       }
 
-      // ---- 2. 每周一 04:00（北京时间）自动备份 ----
+      // ---- 2. 自动备份（每次 cron 都判断，距上次成功满 7 天才真正执行）----
       try {
-        const bj = new Date(Date.now() + 8 * 3600 * 1000);
-        if (bj.getUTCDay() === 1 && bj.getUTCHours() === 4 && bj.getUTCMinutes() < 1) {
-          const enabled = await getConfig(db, 'auto_backup_enabled');
-          if (enabled === '1') {
-            const { performBackup } = await import('./routes/backup.js');
-            const meta = await performBackup(db, storage, { type: 'auto', source: 'cloud' });
-            console.log('[backup] auto ok', meta.filename);
-          }
-        }
+        const meta = await runAutoBackupIfDue(db, storage, 'cloud');
+        if (meta && meta.filename) console.log('[backup] auto ok', meta.filename);
       } catch (e) {
         console.error('[backup] auto failed', e.message);
       }

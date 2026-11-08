@@ -112,6 +112,12 @@ export function configRoutes() {
         await setConfig(db, k, s);
         continue;
       }
+      if (k === 'auto_backup_enabled') {
+        const s = String(v);
+        if (s !== '0' && s !== '1') return c.json({ ok: false, error: 'auto_backup_enabled 必须为 0 或 1' }, 400);
+        await setConfig(db, k, s);
+        continue;
+      }
       if (k === 'sites') {
         if (me.role !== 'super') return c.json({ ok: false, error: '站点配置仅超管可改' }, 403);
         let arr = v;

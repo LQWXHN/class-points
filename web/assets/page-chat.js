@@ -851,13 +851,32 @@
         const textPreview = m.msg_type === 'image' ? '[图片]'
           : m.msg_type === 'file' ? '[文件] ' + ((m.attachments && m.attachments[0] && m.attachments[0].name) || '')
           : (m.content || '').slice(0, 60);
-        return `<div class="chat-search-result" data-uid="${m.uid}" data-id="${m.id}">
-          <div style="font-weight:600">${esc(m.sender_name)}</div>
-          <div style="color:var(--chat-text-2);font-size:13px">${esc(textPreview)}</div>
+        return `<div class="chat-search-result fav-item" data-uid="${m.uid}" data-id="${m.id}">
+          <div class="fav-info" style="flex:1;min-width:0">
+            <div style="font-weight:600">${esc(m.sender_name)}</div>
+            <div style="color:var(--chat-text-2);font-size:13px">${esc(textPreview)}</div>
+          </div>
+          <button class="fav-remove" title="取消收藏" data-uid="${m.uid}"><i class="fas fa-xmark"></i></button>
         </div>`;
       }).join('') : '<p style="color:var(--chat-text-2)">暂无收藏</p>';
       els.panelBody.querySelectorAll('.chat-search-result').forEach(el => {
         el.onclick = () => jumpToId(el.dataset.uid, Number(el.dataset.id));
+      });
+      els.panelBody.querySelectorAll('.fav-remove').forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const uid = btn.dataset.uid;
+          try {
+            await CP.api(`/chat/favorites/${uid}`, { method: 'DELETE' });
+            state.favorites.delete(uid);
+            const row = btn.closest('.chat-search-result');
+            row && row.remove();
+            if (!els.panelBody.querySelector('.chat-search-result')) {
+              els.panelBody.innerHTML = '<p style="color:var(--chat-text-2)">暂无收藏</p>';
+            }
+          } catch {}
+        };
       });
     } catch (e) { els.panelBody.innerHTML = '<p>加载失败</p>'; }
   }

@@ -441,3 +441,24 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .chip { padding: 3px 8px; font-size: 12px; }
   .stu-card { padding: 11px; }
 }
+
+/* ---------- 快捷加减分（前台 quickChange + 后台规则分类条 + 拟造弹窗共用） ---------- */
+.quick-pts { display: flex; gap: 7px; margin-top: 8px; }
+.quick-pts button { flex: 1; padding: 9px; background: var(--surface-2); border-radius: var(--radius-xs); font-size: 13px; font-weight: 700; color: var(--text-2); }
+.quick-pts button:hover { background: var(--primary-soft); color: var(--primary); }
+
+.qc-cat-bar, .rc-cat-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px; scrollbar-width: none; }
+.qc-cat-bar::-webkit-scrollbar, .rc-cat-bar::-webkit-scrollbar { display: none; }
+.qc-cat, .rc-cat { flex: none; padding: 6px 13px; border-radius: 99px; background: var(--surface-2);
+  border: 1px solid transparent; font-size: 12.5px; font-weight: 600; color: var(--text-2); cursor: pointer; transition: all .15s; }
+.qc-cat.active, .rc-cat.active { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+.qc-rules { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-bottom: 10px; }
+.qc-rule-card { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 13px; border-radius: 11px; background: var(--surface-2);
+  border: 1.5px solid transparent; cursor: pointer; transition: all .15s; }
+.qc-rule-card.selected { background: var(--primary-soft); border-color: var(--primary); }
+.qc-rule-card .rc-reason { font-size: 14px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-rule-card .rc-pts { font-size: 15px; font-weight: 800; flex: none; font-variant-numeric: tabular-nums; }
+.qc-rule-card.add .rc-pts { color: var(--green); }
+.qc-rule-card.sub .rc-pts { color: var(--red); }
+#qc-confirm:disabled { opacity: .5; cursor: not-allowed; }

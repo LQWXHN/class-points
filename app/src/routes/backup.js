@@ -99,6 +99,21 @@ export async function performBackup(db, storage, { type = 'manual', source = 'se
   return { filename, size: json.length, created_at: t, key };
 }
 
+// v5.5: 自动备份周期（7 天）
+export const AUTO_INTERVAL = 7 * 24 * 3600 * 1000;
+
+// v5.5: 统一周期判断——开关关 / 距上次成功未满 7 天则跳过；否则执行并在成功后记录时间戳
+export async function runAutoBackupIfDue(db, storage, source) {
+  if ((await getConfig(db, 'auto_backup_enabled')) !== '1') return { skipped: true };
+  const last = Number(await getKv(db, 'auto_backup_last_done_' + source) || 0);
+  if (last !== 0 && Date.now() - last < AUTO_INTERVAL) return { skipped: true };
+  const result = await performBackup(db, storage, { type: 'auto', source });
+  if (!result || result.skipped !== true) {
+    await setKv(db, 'auto_backup_last_done_' + source, String(Date.now()));
+  }
+  return result;
+}
+
 // 转发到对端（node <-> worker）的备份内部接口
 async function peerFetch(c, suffix, init) {
   const peerUrl = c.get('peerUrl');

@@ -214,26 +214,29 @@ async function doExport(box) {
   } finally { btn.disabled = false; }
 }
 
-/* ---------- 拟造记录（v5.4：仅超管，from=admin&fabricate=1） ---------- */
+/* ---------- 拟造记录（v5.5：前台同款加减分 UI，仅超管） ---------- */
 async function openFabricateModal() {
-  let students = [], groups = [], reasons = [];
+  let students = [], groups = [], rules = [];
   try {
     const snap = await CP.api('/snapshot', { handle401: false });
     const d = (snap && (snap.data || snap)) || {};
     students = d.students || [];
     groups = d.groups || [];
-  } catch {}
-  try {
-    const r = await CP.api('/rules', { handle401: false });
-    const arr = (r && (r.data || r)) || [];
-    reasons = [...new Set(arr.map(x => (x.reason || '').trim()).filter(Boolean))];
+    rules = d.rules || [];
   } catch {}
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const defTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  let type = 'add';
+  let curCat = '';
+  let sel = null;
   const box = CP.modal(`
     <h3><i class="fas fa-wand-magic-sparkles" style="color:var(--orange);margin-right:7px"></i>拟造记录</h3>
     <p class="text-2" style="margin:0 0 12px">生成一条不关联真实操作的积分记录（仅超管可见）</p>
+    <div class="segmented" style="width:100%;margin-bottom:12px">
+      <button type="button" data-ftype="add" class="active" style="flex:1">加分</button>
+      <button type="button" data-ftype="sub" style="flex:1">减分</button>
+    </div>
     <div class="form-row"><label class="form-label">对象类型</label>
       <select id="fab-target" class="form-select">
         <option value="student">学生</option>
@@ -241,48 +244,121 @@ async function openFabricateModal() {
       </select></div>
     <div class="form-row"><label class="form-label">对象</label>
       <select id="fab-id" class="form-select"></select></div>
-    <div class="form-row"><label class="form-label">原因</label>
-      <select id="fab-reason" class="form-select">
-        ${reasons.length ? reasons.map(r => `<option>${CP.esc(r)}</option>`).join('') : '<option value="">（暂无规则）</option>'}
-      </select></div>
-    <div class="form-row"><label class="form-label">分值（带符号）</label>
-      <input id="fab-points" type="number" class="form-input" placeholder="如 10 或 -5" min="-100" max="100" style="text-align:center;font-weight:700;font-size:18px"></div>
+    <div id="fab-cats" class="qc-cat-bar"></div>
+    <div id="fab-rules" class="qc-rules"></div>
+    <div id="fab-custom-row" style="display:none">
+      <div class="form-row"><label class="form-label">自定义原因（1-30字）</label>
+        <input id="fab-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
+      <div class="form-row"><label class="form-label">积分值</label>
+        <input id="fab-points" type="number" class="form-input" value="10" min="1" style="text-align:center;font-weight:700;font-size:18px">
+        <div class="quick-pts">
+          <button type="button" data-addval="5">+5</button>
+          <button type="button" data-addval="10">+10</button>
+          <button type="button" data-addval="20">+20</button>
+        </div></div>
+    </div>
     <div class="form-row"><label class="form-label">时间</label>
       <input id="fab-time" type="datetime-local" class="form-input" value="${defTime}"></div>
     <div class="modal-foot">
       <button class="btn" data-act="cancel">取消</button>
-      <button class="btn btn-primary" data-act="ok"><i class="fas fa-wand-magic-sparkles"></i> 拟造</button>
+      <button class="btn btn-primary" data-act="ok" disabled><i class="fas fa-wand-magic-sparkles"></i> 拟造</button>
     </div>`, { size: 'sm' });
+  function curTypeRules() { return rules.filter(r => r.type === type); }
+  function distinctCats() {
+    const out = [];
+    curTypeRules().forEach(r => { const c = r.category || '常规'; if (!out.includes(c)) out.push(c); });
+    return out;
+  }
   function renderObjOptions() {
     const t = box.querySelector('#fab-target').value;
-    const sel = box.querySelector('#fab-id');
+    const selEl = box.querySelector('#fab-id');
     const list = t === 'student' ? students : groups;
-    sel.innerHTML = list.length
+    selEl.innerHTML = list.length
       ? list.map(x => `<option value="${CP.esc(x.uid)}">${CP.esc(x.name)}${t === 'student' && x.student_no ? '（' + CP.esc(x.student_no) + '）' : ''}</option>`).join('')
       : '<option value="">暂无对象</option>';
   }
+  function updateCustomRow() {
+    const row = box.querySelector('#fab-custom-row');
+    const isCustom = sel && Number(sel.is_builtin) === 1;
+    row.style.display = isCustom ? '' : 'none';
+    if (isCustom) {
+      box.querySelector('#fab-points').value = Math.abs(Number(sel.points)) || 10;
+      box.querySelector('#fab-custom-reason').value = '';
+    }
+  }
+  function updateConfirm() { box.querySelector('[data-act=ok]').disabled = !sel; }
+  function renderCats() {
+    const cats = distinctCats();
+    if (!cats.includes(curCat)) curCat = cats[0] || '';
+    const bar = box.querySelector('#fab-cats');
+    bar.innerHTML = cats.length ? cats.map(c => `<button class="qc-cat ${c === curCat ? 'active' : ''}" data-cat="${CP.esc(c)}">${CP.esc(c)}</button>`).join('') : '<div style="color:var(--text-3);font-size:12px;padding:2px 0">该类型暂无分类</div>';
+    bar.querySelectorAll('.qc-cat').forEach(b => b.onclick = () => {
+      curCat = b.dataset.cat; sel = null;
+      renderCats(); renderRules();
+    });
+  }
+  function renderRules() {
+    const wrap = box.querySelector('#fab-rules');
+    const sign = type === 'add' ? '+' : '-';
+    const list = curTypeRules().filter(r => (r.category || '常规') === curCat);
+    if (!list.length) {
+      wrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:22px 0">该分类暂无规则</div>';
+      updateCustomRow(); updateConfirm();
+      return;
+    }
+    wrap.innerHTML = list.map((r, i) => `
+      <div class="qc-rule-card ${type} ${sel === r ? 'selected' : ''}" data-i="${i}">
+        <span class="rc-reason">${CP.esc(r.reason)}</span>
+        <span class="rc-pts">${sign}${Math.abs(r.points)}</span>
+      </div>`).join('');
+    wrap.querySelectorAll('.qc-rule-card').forEach(el => el.onclick = () => {
+      sel = list[Number(el.dataset.i)];
+      renderRules(); updateCustomRow(); updateConfirm();
+    });
+  }
+  function setType(t) {
+    type = t; sel = null; curCat = '';
+    box.querySelectorAll('[data-ftype]').forEach(b => b.classList.toggle('active', b.dataset.ftype === t));
+    const sign = t === 'add' ? '+' : '-';
+    box.querySelectorAll('#fab-custom-row [data-addval]').forEach(b => { b.textContent = sign + parseInt(b.dataset.addval); });
+    renderCats(); renderRules();
+  }
   renderObjOptions();
   box.querySelector('#fab-target').onchange = renderObjOptions;
+  box.querySelectorAll('[data-ftype]').forEach(b => b.onclick = () => setType(b.dataset.ftype));
   box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+  box.querySelectorAll('#fab-custom-row [data-addval]').forEach(b => b.onclick = () => {
+    const inp = box.querySelector('#fab-points');
+    inp.value = Math.max(1, (parseInt(inp.value) || 0) + parseInt(b.dataset.addval));
+  });
   box.querySelector('[data-act=ok]').onclick = async () => {
+    if (!sel) return;
     const target = box.querySelector('#fab-target').value;
     const id = box.querySelector('#fab-id').value;
-    const reason = (box.querySelector('#fab-reason').value || '').trim();
-    const points = parseInt(box.querySelector('#fab-points').value) || 0;
+    let reason, p;
+    if (Number(sel.is_builtin) === 1) {
+      reason = (box.querySelector('#fab-custom-reason').value || '').trim();
+      if (!reason || reason.length > 30) return CP.toast('自定义原因需 1-30 字', 'warn');
+      p = parseInt(box.querySelector('#fab-points').value) || 0;
+      if (!Number.isInteger(p) || p < 1 || p > 100) return CP.toast('积分值需 1-100 整数', 'warn');
+    } else {
+      reason = sel.reason;
+      p = Math.abs(Number(sel.points)) || 10;
+    }
+    p = type === 'sub' ? -Math.abs(p) : Math.abs(p);
     const timeStr = box.querySelector('#fab-time').value;
-    if (!id) return CP.toast('请选择对象', 'warn');
-    if (!reason) return CP.toast('请选择原因', 'warn');
-    if (!Number.isInteger(points) || points === 0 || Math.abs(points) > 100) return CP.toast('分值需为 -100 至 100 的非零整数', 'warn');
     const time = timeStr ? Date.parse(timeStr) : Date.now();
+    if (!id) return CP.toast('请选择对象', 'warn');
     if (!time || isNaN(time)) return CP.toast('时间格式不正确', 'warn');
     const btn = box.querySelector('[data-act=ok]'); btn.disabled = true;
     try {
-      await CP.api('/points/fabricate', { method: 'POST', body: { target, id, reason, points, time } });
+      await CP.api('/points/fabricate', { method: 'POST', body: { target, id, reason, points: p, time } });
       CP.closeModal();
       CP.toast('已拟造记录', 'success');
       await load(true);
     } catch (e) { CP.failToast(e, '拟造失败'); btn.disabled = false; }
   };
+  setType('add');
 }
 
 /* ---------- 事件 ---------- */

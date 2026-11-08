@@ -7,7 +7,7 @@ import { createNodeDb } from './db/node-db.js';
 import { createDiskStorage } from './storage/disk-storage.js';
 import { createApp } from './app.js';
 import { createRunner } from './sync/runner.js';
-import { buildBackup, performBackup } from './routes/backup.js';
+import { buildBackup, runAutoBackupIfDue } from './routes/backup.js';
 import { setSyncOrigin, getConfig, setConfig, now, writeSyncEvent } from './routes/_helpers.js';
 import { startProbeLoop, pickPeerOnline } from './sites-health.js';
 
@@ -45,6 +45,7 @@ await migrateV48(db);
 await migrateV49(db);
 await migrateV50(db);
 await migrateV54(db);
+await migrateV55(db);
 
 const storage = createDiskStorage({ dataDir: DATA_DIR });
 
@@ -156,8 +157,7 @@ async function migrateV47(db) {
   await db.run(`DELETE FROM sync_events WHERE tbl IN
     ('chat_messages','chat_favorites','chat_stickers','chat_reads','push_subscriptions')`);
 
-  // 系统版本号
-  await db.run("UPDATE admin_config SET value='v4.7（2026-10-18）' WHERE key='system_version'");
+  // 系统版本号：仅 key 不存在时插入默认值，不覆盖后台手动设置
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v4.7（2026-10-18）');
 }
@@ -190,15 +190,13 @@ async function migrateV48(db) {
     }
   }
 
-  // 系统版本号
-  await db.run("UPDATE admin_config SET value='v4.8（2026-10-24）' WHERE key='system_version'");
+  // 系统版本号：仅 key 不存在时插入默认值，不覆盖后台手动设置
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v4.8（2026-10-24）');
 }
 
-// v4.9 幂等迁移：无表结构变更，仅更新系统版本号
+// v4.9 幂等迁移：无表结构变更，仅在 key 缺失时兜底插入默认版本号
 async function migrateV49(db) {
-  await db.run("UPDATE admin_config SET value='v4.9（2026-10-25）' WHERE key='system_version'");
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v4.9（2026-10-25）');
 }
@@ -273,7 +271,7 @@ async function migrateV50(db) {
     if (!row) await setConfig(db, k, v);
   }
 
-  await db.run("UPDATE admin_config SET value='v5.1（2026-10-25）' WHERE key='system_version'");
+  // 系统版本号：仅 key 不存在时插入默认值，不覆盖后台手动设置
   const vRow = await db.get("SELECT key FROM admin_config WHERE key='system_version'");
   if (!vRow) await setConfig(db, 'system_version', 'v5.1（2026-10-25）');
 }
@@ -302,6 +300,12 @@ async function migrateV54(db) {
 
   const pcRow = await db.get('SELECT key FROM admin_config WHERE key=?', 'point_categories');
   if (!pcRow) await setConfig(db, 'point_categories', JSON.stringify(['常规']));
+}
+
+// v5.5 幂等迁移：自动备份开关默认开启（仅 key 不存在时插入，绝不覆盖已有值）
+async function migrateV55(db) {
+  const row = await db.get("SELECT key FROM admin_config WHERE key='auto_backup_enabled'");
+  if (!row) await setConfig(db, 'auto_backup_enabled', '1');
 }
 
 // schema.sql 已通过 INSERT OR IGNORE 预置 teacher/admin 账户与默认配置，无需再次 seed
@@ -384,26 +388,13 @@ if (syncSecret) {
   await runner.start();
 }
 
-// 每周一 04:00（服务器本地时间）自动备份
-function scheduleAutoBackup() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(4, 0, 0, 0);
-  // getDay(): 0=周日, 1=周一, ... 6=周六
-  const daysToMonday = (1 - now.getDay() + 7) % 7;
-  next.setDate(now.getDate() + daysToMonday);
-  if (next <= now) next.setDate(next.getDate() + 7);
-  setTimeout(() => {
-    autoBackupOnce().catch(e => console.error('[autoBackup]', e.message));
-    scheduleAutoBackup();
-  }, next.getTime() - now.getTime());
-}
-async function autoBackupOnce() {
-  const enabled = await getConfig(db, 'auto_backup_enabled');
-  if (enabled !== '1') return;
-  const meta = await performBackup(db, storage, { type: 'auto', source: 'server' });
-  console.log('[autoBackup] ok', meta.filename);
-}
-scheduleAutoBackup();
+// v5.5: 自动备份——启动即补做一次（从未做过或距上次成功满 7 天），之后每 60 分钟检查一次
+try {
+  const meta = await runAutoBackupIfDue(db, storage, 'server');
+  console.log('[autoBackup] ok', meta.filename || 'skipped');
+} catch (e) { console.error('[autoBackup]', e.message); }
+setInterval(() => {
+  runAutoBackupIfDue(db, storage, 'server').catch(e => console.error('[autoBackup]', e.message));
+}, 60 * 60 * 1000);
 
 export { db, storage, app, runner };

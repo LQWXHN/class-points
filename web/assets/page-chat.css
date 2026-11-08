@@ -115,6 +115,10 @@ html, body { height: 100%; margin: 0; background: var(--chat-bg); }
 .chat-member-row .rl { font-size: 11px; color: var(--chat-blue-deep); }
 .chat-search-result { padding: 10px 0; border-bottom: 1px solid var(--chat-line); cursor: pointer; }
 .chat-search-result:hover { background: var(--chat-bg); }
+.chat-search-result.fav-item { display: flex; align-items: center; gap: 10px; }
+.fav-remove { flex: none; width: 30px; height: 30px; border-radius: 50%; border: none; background: transparent;
+  color: var(--chat-text-2); display: inline-flex; align-items: center; justify-content: center; transition: background .15s, color .15s; }
+.fav-remove:hover { background: var(--red-soft, rgba(255,59,48,.12)); color: #ff3b30; }
 
 /* 表情面板（v5.4：固定 320×320 浮动 popover，位置由 JS 锚定 #chat-face） */
 .face-panel {

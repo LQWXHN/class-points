@@ -6,6 +6,8 @@ export function studentsRoutes() {
   const ORIGIN = (c) => c.get('origin') || '';
 
   app.get('/students', async (c) => {
+    const me = await verifyUser(c);
+    if (!me) return c.json({ ok: false, error: '未登录' }, 401);
     const db = c.get('db');
     return c.json({ ok: true, data: await db.all('SELECT * FROM students WHERE deleted=0 ORDER BY id') });
   });

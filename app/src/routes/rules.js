@@ -68,6 +68,66 @@ export function rulesRoutes() {
     return c.json({ ok: true, data: cleaned });
   });
 
+  // v5.5: 重命名分类（staff），其下规则 category 同步更新并逐条发 upsert 同步事件
+  app.post('/rules/categories/rename', async (c) => {
+    const me = await verifyUser(c);
+    if (!me) return c.json({ ok: false, error: '未授权' }, 401);
+    const db = c.get('db');
+    const { from, to } = await c.req.json().catch(() => ({}));
+    const nFrom = String(from || '').trim();
+    const nTo = String(to || '').trim();
+    if (!nTo || nTo.length > 20) return c.json({ ok: false, error: '分类名需非空且不超过 20 字' }, 400);
+    let raw = await getConfig(db, 'point_categories');
+    let cats = [];
+    try { cats = JSON.parse(raw || '[]'); } catch {}
+    if (!Array.isArray(cats)) cats = [];
+    if (!cats.some(x => String(x).trim() === nFrom)) return c.json({ ok: false, error: '原分类不存在' }, 400);
+    for (const item of cats) {
+      const v = String(item || '').trim();
+      if (v && v !== nFrom && v === nTo) return c.json({ ok: false, error: '分类名已存在' }, 400);
+    }
+    // 事务外预载命中行（node-db 不允许 tx 内 get）
+    const rows = await db.all('SELECT * FROM point_rules WHERE category=? AND deleted=0', nFrom);
+    const t = now();
+    await db.tx(async () => {
+      await db.run('UPDATE point_rules SET category=?, updated_at=? WHERE category=? AND deleted=0', nTo, t, nFrom);
+      for (const row of rows) {
+        const snap = { ...row, category: nTo, updated_at: t };
+        await writeSyncEvent(db, { tbl: 'point_rules', row_uid: row.uid, op: 'upsert', snapshot: snap, origin: ORIGIN(c) });
+      }
+    });
+    const next = cats.map(x => (String(x).trim() === nFrom ? nTo : x));
+    await setConfig(db, 'point_categories', JSON.stringify(next));
+    return c.json({ ok: true, data: next });
+  });
+
+  // v5.5: 删除分类（staff），其下规则归入「常规」，逐条发 upsert 同步事件
+  app.post('/rules/categories/delete', async (c) => {
+    const me = await verifyUser(c);
+    if (!me) return c.json({ ok: false, error: '未授权' }, 401);
+    const db = c.get('db');
+    const { name } = await c.req.json().catch(() => ({}));
+    const nName = String(name || '').trim();
+    if (nName === '常规') return c.json({ ok: false, error: '常规分类不可删除' }, 400);
+    let raw = await getConfig(db, 'point_categories');
+    let cats = [];
+    try { cats = JSON.parse(raw || '[]'); } catch {}
+    if (!Array.isArray(cats)) cats = [];
+    if (!cats.some(x => String(x).trim() === nName)) return c.json({ ok: false, error: '分类不存在' }, 400);
+    const rows = await db.all('SELECT * FROM point_rules WHERE category=? AND deleted=0', nName);
+    const t = now();
+    await db.tx(async () => {
+      await db.run("UPDATE point_rules SET category='常规', updated_at=? WHERE category=? AND deleted=0", t, nName);
+      for (const row of rows) {
+        const snap = { ...row, category: '常规', updated_at: t };
+        await writeSyncEvent(db, { tbl: 'point_rules', row_uid: row.uid, op: 'upsert', snapshot: snap, origin: ORIGIN(c) });
+      }
+    });
+    const next = cats.filter(x => String(x).trim() !== nName);
+    await setConfig(db, 'point_categories', JSON.stringify(next));
+    return c.json({ ok: true, data: next });
+  });
+
   app.post('/rules', async (c) => {
     const me = await verifyUser(c);
     if (!me) return c.json({ ok: false, error: '未授权' }, 401);

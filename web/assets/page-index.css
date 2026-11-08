@@ -164,28 +164,6 @@
 .dot-on { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
 .dot-off { background: var(--orange); box-shadow: 0 0 0 3px var(--orange-soft); }
 
-/* 快捷分值按钮 */
-.quick-pts { display: flex; gap: 7px; margin-top: 8px; }
-.quick-pts button { flex: 1; padding: 9px; background: var(--surface-2); border-radius: var(--radius-xs); font-size: 13px; font-weight: 700; color: var(--text-2); }
-.quick-pts button:hover { background: var(--primary-soft); color: var(--primary); }
-
-/* v5.4: 快捷加减分——分类条 + 规则卡片 + 小确认 */
-.qc-cat-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px; scrollbar-width: none; }
-.qc-cat-bar::-webkit-scrollbar { display: none; }
-.qc-cat { flex: none; padding: 6px 13px; border-radius: 99px; background: var(--surface-2);
-  border: 1px solid transparent; font-size: 12.5px; font-weight: 600; color: var(--text-2); cursor: pointer; transition: all .15s; }
-.qc-cat.active { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
-.qc-rules { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-bottom: 10px; }
-.qc-rule-card { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 11px 13px; border-radius: 11px; background: var(--surface-2);
-  border: 1.5px solid transparent; cursor: pointer; transition: all .15s; }
-.qc-rule-card.selected { background: var(--primary-soft); border-color: var(--primary); }
-.qc-rule-card .rc-reason { font-size: 14px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qc-rule-card .rc-pts { font-size: 15px; font-weight: 800; flex: none; font-variant-numeric: tabular-nums; }
-.qc-rule-card.add .rc-pts { color: var(--green); }
-.qc-rule-card.sub .rc-pts { color: var(--red); }
-#qc-confirm:disabled { opacity: .5; cursor: not-allowed; }
-
 /* 弹窗内段位说明分组 */
 .tier-group { border: 1px solid var(--separator); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 10px; }
 .tier-group-h { padding: 9px 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }

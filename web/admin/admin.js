@@ -22,7 +22,7 @@
     studentSearch: '', studentBatch: false, studentSel: new Set(),
     groupBatch: false, groupSel: new Set(),
     ruleSelAdd: new Set(), ruleSelSub: new Set(),
-    rulesTab: 'rules',
+    ruleCurCat: null,
     rankTab: 'individual',
     annCat: '全部', annEditingId: null,
     annView: 'home', annRange: 'week', annPub: '', annYear: 0, annMonth: 0, annDay: 0,
@@ -800,20 +800,15 @@
     if (!cats.includes(sel)) cats.unshift(sel);
     return cats.map(c => `<option value="${CP.esc(c)}" ${c === sel ? 'selected' : ''}>${CP.esc(c)}</option>`).join('');
   }
-  function rulesTabsHtml(active) {
-    const tabBtn = (key, label) => `<button class="btn btn-sm" onclick="App.rulesTab('${key}')" style="${key === active ? 'background:var(--primary);color:#fff;font-weight:600' : 'background:var(--fill);color:var(--text-2)'}">${label}</button>`;
-    return `<div style="display:flex;gap:8px;margin-bottom:16px">${tabBtn('rules', '编辑规则')}${tabBtn('categories', '编辑分类标签')}</div>`;
-  }
-  function rulesTab(key) { uiState.rulesTab = key; renderRulesPage(); }
-
   async function renderRulesPage() {
-    if (uiState.rulesTab === 'categories') { await renderRuleCatsPage(); return; }
-    if (!_ruleCats) loadRuleCats(); // 后台预热分类，供弹窗选用
-    const addR = appData.rules.filter(r => r.type === 'add');
-    const subR = appData.rules.filter(r => r.type === 'sub');
+    const cats = await loadRuleCats();
+    if (!uiState.ruleCurCat || !cats.includes(uiState.ruleCurCat)) uiState.ruleCurCat = cats[0] || '常规';
+    const cur = uiState.ruleCurCat;
+    const addR = appData.rules.filter(r => r.type === 'add' && (r.category || '常规') === cur);
+    const subR = appData.rules.filter(r => r.type === 'sub' && (r.category || '常规') === cur);
     const renderList = (list, type) => {
       const selSet = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub;
-      if (!list.length) return '<div class="empty"><i class="fas fa-inbox"></i><p>暂无规则</p></div>';
+      if (!list.length) return '<div class="empty"><i class="fas fa-inbox"></i><p>该分类暂无规则</p></div>';
       return `<div class="rule-list" data-rtype="${type}">` + list.map((r, idx) => {
         const builtin = !!r.is_builtin;
         const pts = type === 'add' ? `+${r.points}` : `-${r.points}`;
@@ -830,10 +825,18 @@
         </div>`;
       }).join('') + `</div>`;
     };
+    const catBar = cats.map((c, i) => `<button class="rc-cat ${c === cur ? 'active' : ''}" onclick="App.selectRuleCat(${i})">${CP.esc(c)}</button>`).join('')
+      + `<button class="rc-cat" onclick="App.addRuleCatInline()" title="新增分类"><i class="fas fa-plus"></i></button>`;
+    const delDisabled = cur === '常规' ? 'disabled' : '';
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header"><h2 class="page-title" style="margin:0">积分规则</h2></div>
-      ${rulesTabsHtml('rules')}
+      <div class="rc-cat-bar">${catBar}</div>
+      <div class="flex aic gap-6" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="App.renameRuleCat()"><i class="fas fa-pen"></i> 重命名</button>
+        <button class="btn btn-sm btn-danger" ${delDisabled} onclick="App.delRuleCat()"><i class="fas fa-trash"></i> 删除</button>
+        <span class="text-3" style="font-size:12px">当前分类：${CP.esc(cur)}</span>
+      </div>
       <div class="rules-grid">
         <div>
           <div class="flex aic gap-6 mb-8 wrap" style="margin-bottom:10px">
@@ -859,70 +862,75 @@
     </div>`;
   }
 
-  async function renderRuleCatsPage() {
-    const cats = await loadRuleCats();
-    const rows = cats.map((c, i) => `
-      <div class="rule-row">
-        <span class="flex1" style="font-size:14px">${CP.esc(c)}</span>
-        <button class="icon-btn" style="color:var(--blue)" onclick="App.renameRuleCat(${i})"><i class="fas fa-pen"></i></button>
-        <button class="icon-btn" style="color:var(--red)" onclick="App.delRuleCat(${i})"><i class="fas fa-trash"></i></button>
-      </div>`).join('');
-    $('main-content').innerHTML = `
-    <div class="card page-card fade-in">
-      <div class="page-header"><h2 class="page-title" style="margin:0">分类标签</h2></div>
-      ${rulesTabsHtml('categories')}
-      <div class="flex aic gap-6" style="margin-bottom:12px">
-        <input id="cat-new" class="form-input" style="flex:1" maxlength="20" placeholder="新分类名称（20 字以内）">
-        <button class="btn btn-primary btn-sm" onclick="App.addRuleCat()"><i class="fas fa-plus"></i> 新增</button>
-      </div>
-      ${cats.length ? `<div class="rule-list">${rows}</div>` : '<div class="empty"><i class="fas fa-inbox"></i><p>暂无分类</p></div>'}
-    </div>`;
+  function selectRuleCat(i) {
+    const cats = _ruleCats || unionRuleCats();
+    if (cats[i] == null) return;
+    uiState.ruleCurCat = cats[i];
+    renderRulesPage();
   }
-  async function saveRuleCats(cats) {
-    try {
-      const r = await CP.api('/rules/categories', { method: 'POST', body: { categories: cats } });
-      _ruleCats = (r && r.ok && Array.isArray(r.data)) ? r.data.slice() : cats.slice();
-      CP.toast('已保存', 'success');
-      renderRulesPage();
-    } catch (e) { CP.failToast(e, '保存失败'); }
+  function addRuleCatInline() {
+    CP.modal(`<h3>新增分类</h3>
+      <div class="form-row"><label class="form-label">分类名称</label><input id="cat-new" class="form-input" maxlength="20" placeholder="20 字以内"></div>
+      <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doAddRuleCat()">新增</button></div>`, { size: 'sm' });
+    setTimeout(() => { const el = $('cat-new'); el && el.focus(); }, 60);
   }
-  async function addRuleCat() {
-    const inp = $('cat-new');
-    const name = inp ? inp.value.trim() : '';
+  async function doAddRuleCat() {
+    const name = ($('cat-new').value || '').trim();
     if (!name) return CP.toast('请输入分类名称', 'warn');
     if (name.length > 20) return CP.toast('分类名称不能超过 20 字', 'warn');
     const cats = (_ruleCats || unionRuleCats()).slice();
     if (cats.includes(name)) return CP.toast('分类已存在', 'warn');
     cats.push(name);
-    await saveRuleCats(cats);
+    try {
+      const r = await CP.api('/rules/categories', { method: 'POST', body: { categories: cats } });
+      _ruleCats = (r && r.ok && Array.isArray(r.data)) ? r.data.slice() : cats.slice();
+      CP.closeModal();
+      uiState.ruleCurCat = name;
+      CP.toast('已新增分类', 'success');
+      renderRulesPage();
+    } catch (e) { CP.failToast(e, '新增失败'); }
   }
-  function renameRuleCat(i) {
+  function renameRuleCat() {
     const cats = _ruleCats || unionRuleCats();
-    if (cats[i] == null) return;
+    const cur = uiState.ruleCurCat || cats[0];
+    if (cur == null) return;
     CP.modal(`<h3>重命名分类</h3>
-      <div class="form-row"><label class="form-label">新名称</label><input id="cat-rename" class="form-input" value="${CP.esc(cats[i])}" maxlength="20"></div>
-      <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doRenameRuleCat(${i})">保存</button></div>`, { size: 'sm' });
+      <div class="form-row"><label class="form-label">新名称</label><input id="cat-rename" class="form-input" value="${CP.esc(cur)}" maxlength="20"></div>
+      <div class="modal-foot"><button class="btn" onclick="CP.closeModal()">取消</button><button class="btn btn-primary" onclick="App.doRenameRuleCat()">保存</button></div>`, { size: 'sm' });
   }
-  async function doRenameRuleCat(i) {
-    const name = $('cat-rename').value.trim();
-    if (!name) return CP.toast('请输入分类名称', 'warn');
-    if (name.length > 20) return CP.toast('分类名称不能超过 20 字', 'warn');
+  async function doRenameRuleCat() {
+    const to = ($('cat-rename').value || '').trim();
+    if (!to) return CP.toast('请输入分类名称', 'warn');
+    if (to.length > 20) return CP.toast('分类名称不能超过 20 字', 'warn');
+    const from = uiState.ruleCurCat;
+    if (to === from) { CP.closeModal(); return; }
     const cats = (_ruleCats || unionRuleCats()).slice();
-    if (cats[i] == null) { CP.closeModal(); return; }
-    if (name === cats[i]) { CP.closeModal(); return; }
-    if (cats.includes(name)) return CP.toast('分类已存在', 'warn');
-    cats[i] = name;
-    CP.closeModal();
-    await saveRuleCats(cats);
+    if (cats.includes(to)) return CP.toast('分类已存在', 'warn');
+    try {
+      await CP.api('/rules/categories/rename', { method: 'POST', body: { from, to } });
+      const idx = cats.indexOf(from);
+      if (idx >= 0) cats[idx] = to;
+      _ruleCats = cats;
+      appData.rules.forEach(r => { if ((r.category || '常规') === from) r.category = to; });
+      CP.closeModal();
+      uiState.ruleCurCat = to;
+      CP.toast('已重命名', 'success');
+      renderRulesPage();
+    } catch (e) { CP.failToast(e, '重命名失败'); }
   }
-  async function delRuleCat(i) {
-    const cats = _ruleCats || unionRuleCats();
-    const name = cats[i];
-    if (name == null) return;
-    const ok = await CP.confirm('删除分类', `确定删除分类「${name}」吗？其下规则将保留原分类。`);
+  async function delRuleCat() {
+    const name = uiState.ruleCurCat;
+    if (!name || name === '常规') return CP.toast('「常规」不可删除', 'warn');
+    const ok = await CP.confirm('删除分类', `确定删除分类「${name}」吗？其下规则将移至「常规」。`);
     if (!ok) return;
-    cats.splice(i, 1);
-    await saveRuleCats(cats);
+    try {
+      await CP.api('/rules/categories/delete', { method: 'POST', body: { name } });
+      _ruleCats = (_ruleCats || unionRuleCats()).slice().filter(c => c !== name);
+      appData.rules.forEach(r => { if ((r.category || '常规') === name) r.category = '常规'; });
+      uiState.ruleCurCat = _ruleCats[0] || '常规';
+      CP.toast('已删除分类', 'success');
+      renderRulesPage();
+    } catch (e) { CP.failToast(e, '删除失败'); }
   }
   function toggleRuleSel(type, id, checked) { const s = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub; if (checked) s.add(id); else s.delete(id); }
 
@@ -2950,7 +2958,7 @@
     showImportGroups, doImportGroups,
     toggleRuleSel, batchDelRules, showAddRule, doAddRule, showEditRule, doEditRule, showBatchAddRule, doBatchAddRule, doDelRule,
     dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
-    rulesTab, addRuleCat, renameRuleCat, doRenameRuleCat, delRuleCat,
+    selectRuleCat, addRuleCatInline, doAddRuleCat, renameRuleCat, doRenameRuleCat, delRuleCat,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,
     switchRankTab,

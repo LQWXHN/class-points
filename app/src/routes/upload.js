@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
 import { verifyUser, verifyDevice } from './_helpers.js';
 
 const MAX_BYTES = 600 * 1024 * 1024; // 600MB
@@ -29,8 +30,14 @@ export function uploadRoutes() {
     const prefix = String(form.get('prefix') || '').trim();
     const safePrefix = /^[a-z0-9_\-/]*$/i.test(prefix) && !prefix.startsWith('/') ? prefix.replace(/\/+$/, '') : '';
     const dir = safePrefix ? `uploads/${safePrefix}/` : 'uploads/';
-    const safeName = file.name.replace(/[^\w.\-一-龥]/g, '_').slice(0, 120) || 'file';
-    const key = `${dir}${Date.now()}_${safeName}`;
+    // v5.5: key 不可枚举——UUID + 白名单扩展名（小写字母数字，≤10 字）
+    let ext = '';
+    const dotIdx = String(file.name || '').lastIndexOf('.');
+    if (dotIdx >= 0 && dotIdx < String(file.name).length - 1) {
+      const cleaned = String(file.name).slice(dotIdx + 1).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10);
+      if (cleaned) ext = '.' + cleaned;
+    }
+    const key = `${dir}${randomUUID()}${ext}`;
     const buf = Buffer.from(await file.arrayBuffer());
     await storage.put(key, buf, file.type || 'application/octet-stream');
     return c.json({
@@ -46,9 +53,18 @@ export function uploadRoutes() {
     const storage = c.get('storage');
     const got = await storage.get(key);
     if (!got) return c.json({ ok: false, error: 'Not Found' }, 404);
+    // v5.5: 三类鉴权任一命中放行（登录用户 / 已激活设备 / 同步密钥）；匿名仅可访问图片
+    const me = await verifyUser(c);
+    const dev = me ? null : await verifyDevice(c);
+    const secret = c.get('syncSecret') || '';
+    const syncKey = c.req.header('X-Sync-Key') || '';
+    const authed = !!me || !!dev || (!!secret && syncKey === secret);
+    if (!authed && !String(got.contentType || '').startsWith('image/')) {
+      return c.json({ ok: false, error: 'Forbidden' }, 403);
+    }
     return c.body(got.body, 200, {
       'Content-Type': got.contentType || 'application/octet-stream',
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': 'private, no-store',
     });
   });
 
