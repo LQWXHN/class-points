@@ -68,6 +68,8 @@ export function authRoutes() {
     const expires = now() + 7 * 86400000;
     await db.run('INSERT INTO sessions (token, username, role, ip, ua, created_at, expires_at) VALUES (?,?,?,?,?,?,?)',
       token, user.username, user.role, ip, u, now(), expires);
+    await writeSyncEvent(db, { tbl: 'sessions', row_uid: token, op: 'upsert',
+      snapshot: { token, username: user.username, role: user.role, ip, ua: u, created_at: now(), expires_at: expires } });
     await db.run('UPDATE admin_users SET last_login=? WHERE username=?', now(), user.username);
     await logLogin(db, { username, role: user.role, ip, ua: u, success: true });
     await notify(db, 'login', '【班级积分系统】登录提醒',

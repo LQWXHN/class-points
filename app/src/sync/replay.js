@@ -459,6 +459,18 @@ export async function replayEvent(db, ev) {
     return;
   }
 
+  // sessions 无 uid/deleted/updated_at，按 token 唯一键 upsert；过期各端 verifyUser 自清，无需同步删除
+  if (tbl === 'sessions') {
+    const snap = parseSnap(ev.snapshot);
+    if (!snap.token) return;
+    await db.run(
+      `INSERT OR REPLACE INTO sessions (token, username, role, ip, ua, created_at, expires_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      snap.token, snap.username, snap.role, snap.ip || '', snap.ua || '',
+      snap.created_at || Date.now(), snap.expires_at || 0);
+    return;
+  }
+
   const opts = tbl === 'admin_config' ? { keyCol: 'key' } : {};
   await applyUpsert(db, ev, tbl, opts);
 }

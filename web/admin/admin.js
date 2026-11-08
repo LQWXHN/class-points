@@ -828,11 +828,16 @@
     const catBar = cats.map((c, i) => `<button class="rc-cat ${c === cur ? 'active' : ''}" onclick="App.selectRuleCat(${i})">${CP.esc(c)}</button>`).join('')
       + `<button class="rc-cat" onclick="App.addRuleCatInline()" title="新增分类"><i class="fas fa-plus"></i></button>`;
     const delDisabled = cur === '常规' ? 'disabled' : '';
+    const curIdx = cats.indexOf(cur);
+    const leftDisabled = curIdx <= 0 ? 'disabled' : '';
+    const rightDisabled = curIdx >= cats.length - 1 ? 'disabled' : '';
     $('main-content').innerHTML = `
     <div class="card page-card fade-in">
       <div class="page-header"><h2 class="page-title" style="margin:0">积分规则</h2></div>
       <div class="rc-cat-bar">${catBar}</div>
       <div class="flex aic gap-6" style="margin-bottom:14px">
+        <button class="btn btn-sm" ${leftDisabled} onclick="App.moveRuleCat(-1)" title="前移"><i class="fas fa-arrow-left"></i></button>
+        <button class="btn btn-sm" ${rightDisabled} onclick="App.moveRuleCat(1)" title="后移"><i class="fas fa-arrow-right"></i></button>
         <button class="btn btn-sm" onclick="App.renameRuleCat()"><i class="fas fa-pen"></i> 重命名</button>
         <button class="btn btn-sm btn-danger" ${delDisabled} onclick="App.delRuleCat()"><i class="fas fa-trash"></i> 删除</button>
         <span class="text-3" style="font-size:12px">当前分类：${CP.esc(cur)}</span>
@@ -933,6 +938,21 @@
     } catch (e) { CP.failToast(e, '删除失败'); }
   }
   function toggleRuleSel(type, id, checked) { const s = type === 'add' ? uiState.ruleSelAdd : uiState.ruleSelSub; if (checked) s.add(id); else s.delete(id); }
+
+  async function moveRuleCat(dir) {
+    const cats = (_ruleCats || unionRuleCats()).slice();
+    const cur = uiState.ruleCurCat;
+    const i = cats.indexOf(cur);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= cats.length) return;
+    const next = cats.slice();
+    const tmp = next[i]; next[i] = next[j]; next[j] = tmp;
+    try {
+      const r = await CP.api('/rules/categories', { method: 'POST', body: { categories: next } });
+      _ruleCats = (r && r.ok && Array.isArray(r.data)) ? r.data.slice() : next;
+      renderRulesPage();
+    } catch (e) { CP.failToast(e, '调整失败'); }
+  }
 
   // ---- 规则拖拽排序（同 type 列表内） ----
   let _dragRuleUid = null;
@@ -2958,7 +2978,7 @@
     showImportGroups, doImportGroups,
     toggleRuleSel, batchDelRules, showAddRule, doAddRule, showEditRule, doEditRule, showBatchAddRule, doBatchAddRule, doDelRule,
     dragRuleStart, dragRuleOver, dropRule, dragRuleEnd,
-    selectRuleCat, addRuleCatInline, doAddRuleCat, renameRuleCat, doRenameRuleCat, delRuleCat,
+    selectRuleCat, addRuleCatInline, doAddRuleCat, renameRuleCat, doRenameRuleCat, delRuleCat, moveRuleCat,
     showAddAnn, doAddAnn, doDelAnn, showEditAnn, showAnnVersions, setAnnCat,
     annGoHome, annGoRange, annGoPub, annGoYear, annGoMonth, annGoDay, showAnnDetail,
     switchRankTab,

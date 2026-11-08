@@ -436,7 +436,10 @@ async function quickChange(sid, type) {
     const inp = box.querySelector('#qc-points');
     inp.value = Math.max(1, (parseInt(inp.value) || 0) + parseInt(b.getAttribute('data-addval')));
   });
-  const cats = await loadQcCategories();
+  const allCats = await loadQcCategories();
+  const have = new Set(rules.map(r => r.category || '常规'));
+  let cats = allCats.filter(c => have.has(c));
+  if (!cats.length) cats = [...have];
   curCat = cats[0] || '常规';
   renderCats(cats);
   renderRules(cats);
