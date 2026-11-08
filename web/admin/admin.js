@@ -3030,19 +3030,23 @@
     if (CP.getAdminToken()) {
       let role = 'teacher', name = '';
       try { role = localStorage.getItem('cp_admin_role') || 'teacher'; name = localStorage.getItem('cp_admin_name') || ''; } catch (e) {}
-      // 以 /auth/me 为准，避免本地缓存的角色/昵称过期
-      try {
-        const me = await CP.api('/auth/me');
-        const info = (me && me.data) || me;
-        if (info && info.role) {
-          role = info.role;
-          if (info.display_name) name = info.display_name;
-          try { localStorage.setItem('cp_admin_role', role); localStorage.setItem('cp_admin_name', name); } catch (e) {}
-        }
-      } catch (e) {
-        if (e && e.status === 401) return; // onAdminUnauthorized 已处理
-      }
+      // 先用缓存身份立即进入，避免等待 /auth/me 期间白屏；随后异步校正角色
       enterAdmin(role, name);
+      (async () => {
+        try {
+          const me = await CP.api('/auth/me', { timeoutMs: 8000 });
+          const info = (me && me.data) || me;
+          if (info && info.role && info.role !== role) {
+            try { localStorage.setItem('cp_admin_role', info.role); } catch (e) {}
+            currentUser.role = info.role;
+            $('user-role').textContent = info.role === 'super' ? '超级管理员' : '班主任';
+            $('logo-sub').textContent = info.role === 'super' ? 'Super Admin' : 'Teacher';
+            renderNav();
+          }
+        } catch (e) {
+          if (e && e.status === 401) return; // onAdminUnauthorized 已处理
+        }
+      })();
       // v5.1: 群聊未读角标 + 预览
       async function refreshChatNav() {
         try {

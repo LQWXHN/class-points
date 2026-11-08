@@ -163,10 +163,11 @@
   }
 
   // XHR 封装（支持上传进度）
-  function xhrSend(method, url, body, headers, onProgress) {
+  function xhrSend(method, url, body, headers, onProgress, timeoutMs) {
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest();
       x.open(method, url, true);
+      x.timeout = timeoutMs || 15000;
       Object.entries(headers).forEach(([k, v]) => x.setRequestHeader(k, v));
       x.upload.onprogress = e => { if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total); };
       x.onload = () => {
@@ -175,7 +176,7 @@
         resolve({ status: x.status, data });
       };
       x.onerror = () => reject(new NetworkError());
-      x.ontimeout = () => reject(new NetworkError());
+      x.ontimeout = () => reject(new NetworkError('请求超时'));
       x.send(body);
     });
   }
@@ -199,12 +200,20 @@
       body = JSON.stringify(opts.body);
       headers['Content-Type'] = 'application/json';
     }
+    const timeoutMs = opts.timeoutMs || 15000;
+    let abortCtrl = null;
+    const fetchSignal = opts.signal || (() => {
+      abortCtrl = new AbortController();
+      const t = setTimeout(() => abortCtrl.abort(), timeoutMs);
+      abortCtrl.signal.addEventListener('abort', () => clearTimeout(t));
+      return abortCtrl.signal;
+    })();
     try {
       let res;
       if (opts.onProgress || body instanceof FormData) {
-        res = await xhrSend(method, url, body, headers, opts.onProgress);
+        res = await xhrSend(method, url, body, headers, opts.onProgress, timeoutMs);
       } else {
-        const r = await fetch(url, { method, headers, body, signal: opts.signal, credentials: 'omit' });
+        const r = await fetch(url, { method, headers, body, signal: fetchSignal, credentials: 'omit' });
         const text = await r.text();
         let data = {};
         try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { rawText: text }; }
@@ -226,6 +235,7 @@
       return opts.raw ? res : res.data;
     } catch (e) {
       if (e instanceof ApiError) throw e;
+      if (e && e.name === 'AbortError') throw new NetworkError('请求超时');
       if (e instanceof TypeError || (e && e.name === 'NetworkError')) throw new NetworkError();
       throw e;
     }
