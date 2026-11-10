@@ -406,6 +406,7 @@ async function quickChange(sid, type) {
       updateCustomRow();
       updateConfirm();
     });
+    updateCustomRow(); updateConfirm();
   }
   function doConfirm() {
     if (!sel) return;
@@ -454,61 +455,108 @@ function showBatchPoints(type) {
   const targetText = ui.selected.size > 0 ? `已选 ${ui.selected.size} 名学生` : '将对所有学生操作';
   const box = CP.modal(`
     <h3>${opText}</h3>
-    <p style="color:var(--text-2);margin:0 0 14px">${CP.esc(targetText)}</p>
-    <div class="form-row"><label class="form-label">原因</label>
-      <select id="bp-reason" class="form-select">
-        ${rules.map(r => `<option value="${CP.esc(r.reason)}" data-p="${r.points}">${CP.esc(r.reason)} (${sign}${Math.abs(r.points)})</option>`).join('')}
-      </select></div>
-    <div class="form-row"><label class="form-label">积分值</label>
-      <input id="bp-points" type="number" class="form-input" value="${Math.abs(rules[0] && rules[0].points) || 10}" min="1" style="text-align:center;font-weight:700;font-size:18px">
-      <div class="quick-pts">
-        <button type="button" data-addval="5">${sign}5</button>
-        <button type="button" data-addval="10">${sign}10</button>
-        <button type="button" data-addval="20">${sign}20</button>
-      </div></div>
-    <div class="form-row" id="bp-custom-row" style="display:none"><label class="form-label">自定义原因（1-30字）</label>
-      <input id="bp-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
+    <p style="color:var(--text-2);margin:0 0 12px">${CP.esc(targetText)}</p>
+    <div id="bp-cats" class="qc-cat-bar"></div>
+    <div id="bp-rules" class="qc-rules"></div>
+    <div id="bp-custom-row" style="display:none">
+      <div class="form-row"><label class="form-label">自定义原因（1-30字）</label>
+        <input id="bp-custom-reason" type="text" class="form-input" maxlength="30" placeholder="必填，说明本次操作原因"></div>
+      <div class="form-row"><label class="form-label">积分值</label>
+        <input id="bp-points" type="number" class="form-input" value="10" min="1" style="text-align:center;font-weight:700;font-size:18px">
+        <div class="quick-pts">
+          <button type="button" data-addval="5">${sign}5</button>
+          <button type="button" data-addval="10">${sign}10</button>
+          <button type="button" data-addval="20">${sign}20</button>
+        </div></div>
+    </div>
     <div class="modal-foot">
       <button class="btn" data-act="cancel">取消</button>
-      <button class="btn ${type === 'add' ? 'btn-success' : 'btn-danger'}" data-act="ok">${opText}</button>
+      <button class="btn ${type === 'add' ? 'btn-success' : 'btn-danger'}" id="bp-confirm" disabled>${opText}</button>
     </div>`, { size: 'sm' });
-  box.querySelector('#bp-reason').onchange = function () {
-    const isCustom = this.value === '自定义';
-    box.querySelector('#bp-custom-row').style.display = isCustom ? '' : 'none';
-    const p = this.options[this.selectedIndex].getAttribute('data-p');
-    if (isCustom) { box.querySelector('#bp-points').value = ''; }
-    else if (p) box.querySelector('#bp-points').value = Math.abs(parseInt(p) || 0);
-  };
+  let curCat = '';
+  let sel = null;
+
+  function updateCustomRow() {
+    const row = box.querySelector('#bp-custom-row');
+    const isCustom = sel && Number(sel.is_builtin) === 1;
+    row.style.display = isCustom ? '' : 'none';
+    if (isCustom) {
+      box.querySelector('#bp-points').value = Math.abs(Number(sel.points)) || 10;
+      box.querySelector('#bp-custom-reason').value = '';
+    }
+  }
+  function updateConfirm() { box.querySelector('#bp-confirm').disabled = !sel; }
+  function renderCats(cats) {
+    const bar = box.querySelector('#bp-cats');
+    bar.innerHTML = cats.map(c => `<button class="qc-cat ${c === curCat ? 'active' : ''}" data-cat="${CP.esc(c)}">${CP.esc(c)}</button>`).join('');
+    bar.querySelectorAll('.qc-cat').forEach(b => b.onclick = () => {
+      curCat = b.dataset.cat; sel = null;
+      renderCats(cats); renderRules(cats);
+    });
+  }
+  function renderRules(cats) {
+    const wrap = box.querySelector('#bp-rules');
+    const list = rules.filter(r => (r.category || '常规') === curCat);
+    if (!list.length) {
+      wrap.innerHTML = '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:22px 0">该分类暂无规则</div>';
+      updateCustomRow(); updateConfirm();
+      return;
+    }
+    wrap.innerHTML = list.map((r, i) => `
+      <div class="qc-rule-card ${type} ${sel === r ? 'selected' : ''}" data-i="${i}">
+        <span class="rc-reason">${CP.esc(r.reason)}</span>
+        <span class="rc-pts">${sign}${Math.abs(r.points)}</span>
+      </div>`).join('');
+    wrap.querySelectorAll('.qc-rule-card').forEach(el => el.onclick = () => {
+      sel = list[Number(el.dataset.i)];
+      renderRules(cats);
+      updateCustomRow(); updateConfirm();
+    });
+    updateCustomRow(); updateConfirm();
+  }
+  box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
+  box.querySelector('#bp-confirm').onclick = () => doBatchPoints(type, sel, box);
   box.querySelectorAll('[data-addval]').forEach(b => b.onclick = () => {
     const inp = box.querySelector('#bp-points');
     inp.value = Math.max(1, (parseInt(inp.value) || 0) + parseInt(b.getAttribute('data-addval')));
   });
-  box.querySelector('[data-act=cancel]').onclick = () => CP.closeModal();
-  box.querySelector('[data-act=ok]').onclick = () => doBatchPoints(type, box);
+  (async () => {
+    const allCats = await loadQcCategories();
+    const have = new Set(rules.map(r => r.category || '常规'));
+    let cats = allCats.filter(c => have.has(c));
+    if (!cats.length) cats = [...have];
+    curCat = cats[0] || '常规';
+    renderCats(cats); renderRules(cats);
+  })();
 }
-async function doBatchPoints(type, box) {
-  const isCustom = box.querySelector('#bp-reason').value === '自定义';
+async function doBatchPoints(type, sel, box) {
+  if (!sel) return;
   let reason, p;
-  if (isCustom) {
+  if (Number(sel.is_builtin) === 1) {
     reason = (box.querySelector('#bp-custom-reason').value || '').trim();
     if (!reason || reason.length > 30) return CP.toast('自定义原因需 1-30 字', 'warn');
     p = parseInt(box.querySelector('#bp-points').value) || 0;
     if (!Number.isInteger(p) || p < 1 || p > 100) return CP.toast('积分值需 1-100 整数', 'warn');
   } else {
-    reason = box.querySelector('#bp-reason').value;
-    p = parseInt(box.querySelector('#bp-points').value) || 0;
+    reason = sel.reason;
+    p = Math.abs(Number(sel.points)) || 10;
   }
   p = type === 'sub' ? -Math.abs(p) : Math.abs(p);
   let targets = ui.selected.size > 0 ? appData.students.filter(s => ui.selected.has(s.id)) : appData.students.slice();
   if (!targets.length) return CP.toast('没有目标学生', 'error');
-  const ops = targets.map(s => { const o = { studentId: s.id, points: p, reason, type: type === 'sub' ? 'sub' : 'add' }; if (isCustom) o.custom = 1; return o; });
+  const ops = targets.map(s => {
+    const o = { studentId: s.id, points: p, reason, type: type === 'sub' ? 'sub' : 'add' };
+    if (Number(sel.is_builtin) === 1) o.custom = 1;
+    return o;
+  });
+  const btn = box.querySelector('#bp-confirm'); btn.disabled = true;
   try {
     await CP.api('/points/batch', { method: 'POST', body: { operations: ops } });
     CP.toast(`已为 ${targets.length} 名学生${type === 'add' ? '加' : '减'} ${Math.abs(p)} 分`, 'success');
     CP.closeModal();
     if (ui.batchMode) { ui.selected.clear(); updateCount(); exitBatch(); renderCards(); }
     refreshData();
-  } catch (e) { CP.failToast(e); }
+  } catch (e) { CP.failToast(e); btn.disabled = false; }
 }
 
 /* ---------- 排行榜 ---------- */
