@@ -462,3 +462,49 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .qc-rule-card.add .rc-pts { color: var(--green); }
 .qc-rule-card.sub .rc-pts { color: var(--red); }
 #qc-confirm:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------- 液态玻璃主题（html[data-style="liquid"]） ---------- */
+html[data-style="liquid"] {
+  --surface-solid: rgba(255, 255, 255, .55);
+  --surface: rgba(255, 255, 255, .42);
+  --lg-edge: rgba(255, 255, 255, .55);
+  --lg-shadow: 0 4px 12px rgba(0, 0, 0, .10), 0 -10px 25px inset rgba(0, 0, 0, .06), inset 0 1px 1px rgba(255, 255, 255, .55);
+  --lg-backdrop: blur(22px) saturate(180%);
+}
+html[data-style="liquid"] body { background: transparent; }
+html[data-style="liquid"] body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(58% 52% at 18% 22%, rgba(255, 140, 175, .6), transparent 68%),
+    radial-gradient(60% 58% at 82% 26%, rgba(125, 195, 255, .6), transparent 68%),
+    radial-gradient(64% 60% at 55% 84%, rgba(255, 205, 120, .55), transparent 68%),
+    linear-gradient(180deg, #eef1f6, #e7ebf2);
+}
+html[data-style="liquid"] .card,
+html[data-style="liquid"] .side,
+html[data-style="liquid"] .modal,
+html[data-style="liquid"] .toast,
+html[data-style="liquid"] .site-switch-pop {
+  background: var(--surface-solid);
+  -webkit-backdrop-filter: var(--lg-backdrop);
+  backdrop-filter: var(--lg-backdrop);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow);
+}
+html[data-style="liquid"] .stu-card.selected { border-color: var(--primary); }
+html[data-style="liquid"] .glass { background: var(--surface); border-color: var(--lg-edge); }
+@media (prefers-color-scheme: dark) {
+  html[data-style="liquid"] {
+    --surface-solid: rgba(30, 30, 32, .55);
+    --surface: rgba(30, 30, 32, .42);
+    --lg-edge: rgba(255, 255, 255, .14);
+    --lg-shadow: 0 4px 12px rgba(0, 0, 0, .5), 0 -10px 25px inset rgba(0, 0, 0, .3), inset 0 1px 1px rgba(255, 255, 255, .14);
+  }
+  html[data-style="liquid"] body::before {
+    background:
+      radial-gradient(58% 52% at 18% 22%, rgba(255, 86, 134, .45), transparent 68%),
+      radial-gradient(60% 58% at 82% 26%, rgba(64, 140, 255, .5), transparent 68%),
+      radial-gradient(64% 60% at 55% 84%, rgba(255, 186, 84, .38), transparent 68%),
+      linear-gradient(180deg, #15151a, #0a0a0d);
+  }
+}

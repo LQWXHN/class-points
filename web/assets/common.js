@@ -14,6 +14,7 @@
   const LS_ADMIN = 'admin_token';
   const LS_READ_MAX = 'cp_read_ann_max';
   const LS_READ_SET = 'cp_read_ann_set';
+  const LS_STYLE = 'cp_style';
 
   /* ---------- 基础工具 ---------- */
   CP.uuid = function () {
@@ -724,6 +725,175 @@
     if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'PRELOAD_STATUS' });
   };
 
+  /* ---------- 主题风格：苹果风 / 液态玻璃 ---------- */
+  CP.getStyle = function () {
+    try { return localStorage.getItem(LS_STYLE) === 'liquid' ? 'liquid' : 'apple'; } catch (e) { return 'apple'; }
+  };
+  CP.setStyle = function (v) {
+    try { localStorage.setItem(LS_STYLE, v === 'liquid' ? 'liquid' : 'apple'); } catch (e) {}
+  };
+  CP.applyStyle = function () {
+    if (CP.getStyle() === 'liquid') document.documentElement.dataset.style = 'liquid';
+    else delete document.documentElement.dataset.style;
+  };
+
+  CP.openStyleSheet = function () {
+    const cur = CP.getStyle();
+    const opts = [
+      { id: 'apple', icon: 'fa-brands fa-apple', name: '苹果风', desc: '默认简洁质感' },
+      { id: 'liquid', icon: 'fas fa-droplet', name: '液态玻璃', desc: '边缘折射 · 毛玻璃' }
+    ];
+    const box = CP.modal(
+      '<h3><i class="fas fa-palette" style="color:var(--primary);margin-right:7px"></i>风格切换</h3>' +
+      '<div style="display:flex;flex-direction:column;gap:9px;margin-top:4px">' +
+      opts.map(o => `
+        <button class="style-opt" data-style="${o.id}" style="display:flex;align-items:center;gap:11px;width:100%;padding:13px 14px;border-radius:13px;background:var(--surface-2);text-align:left;transition:transform .12s,background .18s">
+          <i class="${o.icon}" style="font-size:18px;color:var(--primary);width:22px;text-align:center"></i>
+          <span style="flex:1;min-width:0">
+            <span style="display:block;font-size:15px;font-weight:700">${o.name}</span>
+            <span style="display:block;font-size:12px;color:var(--text-3);margin-top:1px">${o.desc}</span>
+          </span>
+          <i class="fas fa-check" style="color:var(--primary);font-size:15px;${cur === o.id ? '' : 'visibility:hidden'}"></i>
+        </button>`).join('') +
+      '</div>', { size: 'sm' });
+    box.querySelectorAll('.style-opt').forEach(b => b.onclick = () => {
+      const v = b.dataset.style;
+      CP.setStyle(v);
+      CP.applyStyle();
+      CP.liquidGlass.reload();
+      CP.closeModal();
+      CP.toast(v === 'liquid' ? '已切换为液态玻璃' : '已切换为苹果风', 'success');
+    });
+  };
+
+  /* ---------- 液态玻璃折射引擎（per-element userSpaceOnUse，失败回退纯 CSS） ---------- */
+  CP.liquidGlass = (function () {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const SELECTOR = '.stu-card, .grp-card, .top-stat, .modal, .toast, .site-switch-pop, .saying-card';
+    const MAX_PIXELS = 480000;
+    const SDF_W = .3, SDF_H = .2, SDF_R = .6;
+    let svgRoot = null, ro = null, mo = null, seq = 0, scheduled = false;
+    const registry = new Map();
+
+    function smoothStep(a, b, t) { t = Math.max(0, Math.min(1, (t - a) / (b - a))); return t * t * (3 - 2 * t); }
+    function sdf(x, y, w, h, r) {
+      const qx = Math.abs(x) - w + r, qy = Math.abs(y) - h + r;
+      return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
+    }
+    function makeMap(w, h) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      const data = new Uint8ClampedArray(w * h * 4);
+      const raw = new Float32Array(w * h * 2);
+      let max = 0;
+      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+        const ix = px / w - .5, iy = py / h - .5;
+        const d = sdf(ix, iy, SDF_W, SDF_H, SDF_R);
+        const sc = smoothStep(0, 1, smoothStep(.8, 0, d - .15));
+        const k = (py * w + px) * 2;
+        raw[k] = (ix * sc + .5) * w - px;
+        raw[k + 1] = (iy * sc + .5) * h - py;
+        max = Math.max(max, Math.abs(raw[k]), Math.abs(raw[k + 1]));
+      }
+      max *= .5;
+      for (let p = 0, i = 0; i < data.length; i += 4, p += 2) {
+        data[i] = (raw[p] / max + .5) * 255;
+        data[i + 1] = (raw[p + 1] / max + .5) * 255;
+        data[i + 2] = 0; data[i + 3] = 255;
+      }
+      ctx.putImageData(new ImageData(data, w, h), 0, 0);
+      return { url: c.toDataURL(), scale: max };
+    }
+    function ensureSvg() {
+      if (!svgRoot) {
+        svgRoot = document.createElementNS(SVG_NS, 'svg');
+        svgRoot.setAttribute('width', '0'); svgRoot.setAttribute('height', '0');
+        svgRoot.style.position = 'absolute';
+        document.body.appendChild(svgRoot);
+      }
+      return svgRoot;
+    }
+    function clearInline(el) {
+      el.style.removeProperty('backdrop-filter');
+      el.style.removeProperty('-webkit-backdrop-filter');
+    }
+    function teardown(el) {
+      const rec = registry.get(el);
+      if (rec) {
+        if (rec.filter.parentNode) rec.filter.parentNode.removeChild(rec.filter);
+        registry.delete(el);
+      }
+      if (ro) ro.unobserve(el);
+      clearInline(el);
+    }
+    function build(el) {
+      const w = el.offsetWidth, h = el.offsetHeight;
+      if (!w || !h) return;
+      const rec = registry.get(el);
+      if (rec && rec.width === w && rec.height === h) return;
+      teardown(el);
+      if (w * h > MAX_PIXELS) return;
+      const map = makeMap(w, h);
+      const id = 'lgf' + (++seq);
+      const f = document.createElementNS(SVG_NS, 'filter');
+      f.id = id;
+      f.setAttribute('filterUnits', 'userSpaceOnUse');
+      f.setAttribute('color-interpolation-filters', 'sRGB');
+      f.setAttribute('x', '0'); f.setAttribute('y', '0');
+      f.setAttribute('width', w); f.setAttribute('height', h);
+      const img = document.createElementNS(SVG_NS, 'feImage');
+      img.id = id + '_img';
+      img.setAttribute('x', '0'); img.setAttribute('y', '0');
+      img.setAttribute('width', w); img.setAttribute('height', h);
+      img.setAttribute('href', map.url);
+      const dm = document.createElementNS(SVG_NS, 'feDisplacementMap');
+      dm.setAttribute('in', 'SourceGraphic');
+      dm.setAttribute('in2', '#' + img.id);
+      dm.setAttribute('xChannelSelector', 'R');
+      dm.setAttribute('yChannelSelector', 'G');
+      dm.setAttribute('scale', map.scale);
+      f.appendChild(img); f.appendChild(dm);
+      ensureSvg().appendChild(f);
+      const chain = 'url(#' + id + ') blur(.25px) contrast(1.2) brightness(1.05) saturate(1.1)';
+      el.style.webkitBackdropFilter = chain;
+      el.style.backdropFilter = chain;
+      registry.set(el, { width: w, height: h, filter: f });
+    }
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => { scheduled = false; refresh(); });
+    }
+    function refresh() {
+      if (CP.getStyle() !== 'liquid') return;
+      document.querySelectorAll(SELECTOR).forEach(el => {
+        if (ro) ro.observe(el);
+        if (el.isConnected) build(el);
+      });
+      Array.from(registry.keys()).forEach(el => { if (!el.isConnected) teardown(el); });
+    }
+    function start() {
+      if (ro) return;
+      ro = new ResizeObserver(schedule);
+      mo = new MutationObserver(muts => {
+        if (muts.some(m => m.addedNodes.length || m.removedNodes.length)) schedule();
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+      schedule();
+    }
+    function stop() {
+      if (ro) { ro.disconnect(); ro = null; }
+      if (mo) { mo.disconnect(); mo = null; }
+      Array.from(registry.keys()).forEach(teardown);
+      if (svgRoot) { svgRoot.remove(); svgRoot = null; }
+    }
+    function reload() {
+      stop();
+      if (CP.getStyle() === 'liquid') start();
+    }
+    return { start, stop, reload, refresh };
+  })();
+
   CP.openMoreMenu = function (anchor) {
     if (!anchor || !anchor.getBoundingClientRect) return;
     let pop = null, back = null;
@@ -742,6 +912,7 @@
     pop.className = 'site-switch-pop more-pop';
     pop.innerHTML = '<div class="ss-title">更多</div>' + [
       ['切换站点', 'fa-globe', 'switch'],
+      ['风格切换', 'fa-palette', 'style'],
       ['极速预载', 'fa-gauge-high', 'preload'],
       ['意见反馈', 'fa-comment-dots', 'feedback'],
       ['关于版本', 'fa-circle-info', 'version']
@@ -761,6 +932,7 @@
     pop.querySelectorAll('.ss-item').forEach(b => b.onclick = () => {
       const act = b.dataset.act; close();
       if (act === 'switch') CP.openSiteSwitcher(anchor);
+      else if (act === 'style') CP.openStyleSheet();
       else if (act === 'preload') CP.openPreloadStation();
       else if (act === 'feedback') CP.feedbackModal();
       else if (act === 'version') CP.versionToast();
@@ -892,8 +1064,10 @@
   };
 
   /* ---------- 初始化 ---------- */
+  CP.applyStyle();
   CP.bindImageGuard();
   CP.registerSW();
   CP.loadBootstrap();
+  if (CP.getStyle() === 'liquid') CP.liquidGlass.start();
 
 })();
