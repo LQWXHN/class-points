@@ -508,3 +508,68 @@ html[data-style="liquid"] .glass { background: var(--surface); border-color: var
       linear-gradient(180deg, #15151a, #0a0a0d);
   }
 }
+
+/* ---------- 炫彩玻璃主题（html[data-style="vivid"]） ---------- */
+html[data-style="vivid"] {
+  --surface-solid: rgba(255, 255, 255, .52);
+  --surface: rgba(255, 255, 255, .40);
+  --panel: rgba(255, 255, 255, .16);
+  --lg-edge: rgba(255, 255, 255, .65);
+  --lg-shadow: 0 6px 18px rgba(60, 30, 120, .28), 0 -12px 26px inset rgba(80, 40, 140, .10), inset 0 1px 1px rgba(255, 255, 255, .7);
+  --lg-backdrop: blur(20px) saturate(190%);
+}
+html[data-style="vivid"] body { background: transparent; }
+html[data-style="vivid"] body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    repeating-linear-gradient(135deg, rgba(96, 62, 189, .10) 0 2px, transparent 2px 28px),
+    radial-gradient(36% 36% at 15% 20%, #ff6fa8 0%, #ff6fa8 55%, rgba(255, 111, 168, 0) 57%),
+    radial-gradient(32% 32% at 86% 16%, #5aa2ff 0%, #5aa2ff 55%, rgba(90, 162, 255, 0) 57%),
+    radial-gradient(38% 38% at 80% 82%, #a78bfa 0%, #a78bfa 55%, rgba(167, 139, 250, 0) 57%),
+    radial-gradient(34% 34% at 16% 84%, #ffb84d 0%, #ffb84d 55%, rgba(255, 184, 77, 0) 57%),
+    radial-gradient(28% 28% at 50% 46%, #5eead4 0%, #5eead4 55%, rgba(94, 234, 212, 0) 57%),
+    linear-gradient(150deg, #f4f0ff, #e8e3fb);
+}
+html[data-style="vivid"] .side,
+html[data-style="vivid"] .modal,
+html[data-style="vivid"] .toast,
+html[data-style="vivid"] .site-switch-pop {
+  background: var(--surface-solid);
+  -webkit-backdrop-filter: var(--lg-backdrop);
+  backdrop-filter: var(--lg-backdrop);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow);
+}
+html[data-style="vivid"] .card:not(.stu-card):not(.grp-card):not(.top-stat) {
+  background: var(--panel);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow);
+}
+html[data-style="vivid"] .stu-card,
+html[data-style="vivid"] .grp-card,
+html[data-style="vivid"] .top-stat {
+  background: var(--surface-solid);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow);
+}
+html[data-style="vivid"] .stu-card.selected { border-color: var(--primary); }
+html[data-style="vivid"] .glass { background: var(--surface); border-color: var(--lg-edge); }
+@media (prefers-color-scheme: dark) {
+  html[data-style="vivid"] {
+    --surface-solid: rgba(28, 24, 40, .55);
+    --surface: rgba(28, 24, 40, .42);
+    --panel: rgba(255, 255, 255, .06);
+    --lg-edge: rgba(255, 255, 255, .16);
+    --lg-shadow: 0 6px 20px rgba(0, 0, 0, .55), 0 -12px 28px inset rgba(0, 0, 0, .32), inset 0 1px 1px rgba(255, 255, 255, .16);
+  }
+  html[data-style="vivid"] body::before {
+    background:
+      repeating-linear-gradient(135deg, rgba(255, 255, 255, .07) 0 2px, transparent 2px 28px),
+      radial-gradient(36% 36% at 15% 20%, #ff4d94 0%, #ff4d94 55%, rgba(255, 77, 148, 0) 57%),
+      radial-gradient(32% 32% at 86% 16%, #4d9bff 0%, #4d9bff 55%, rgba(77, 155, 255, 0) 57%),
+      radial-gradient(38% 38% at 80% 82%, #8b5cf6 0%, #8b5cf6 55%, rgba(139, 92, 246, 0) 57%),
+      radial-gradient(34% 34% at 16% 84%, #ff9f3d 0%, #ff9f3d 55%, rgba(255, 159, 61, 0) 57%),
+      radial-gradient(28% 28% at 50% 46%, #2dd4bf 0%, #2dd4bf 55%, rgba(45, 212, 191, 0) 57%),
+      linear-gradient(150deg, #221543, #0c0818);
+  }
+}

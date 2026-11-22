@@ -726,22 +726,28 @@
   };
 
   /* ---------- 主题风格：苹果风 / 液态玻璃 ---------- */
+  const STYLES = ['apple', 'liquid', 'vivid'];
   CP.getStyle = function () {
-    try { return localStorage.getItem(LS_STYLE) === 'liquid' ? 'liquid' : 'apple'; } catch (e) { return 'apple'; }
+    let v = 'apple';
+    try { v = localStorage.getItem(LS_STYLE) || 'apple'; } catch (e) {}
+    return STYLES.includes(v) ? v : 'apple';
   };
   CP.setStyle = function (v) {
-    try { localStorage.setItem(LS_STYLE, v === 'liquid' ? 'liquid' : 'apple'); } catch (e) {}
+    try { localStorage.setItem(LS_STYLE, STYLES.includes(v) ? v : 'apple'); } catch (e) {}
   };
   CP.applyStyle = function () {
-    if (CP.getStyle() === 'liquid') document.documentElement.dataset.style = 'liquid';
-    else delete document.documentElement.dataset.style;
+    const s = CP.getStyle();
+    if (s === 'apple') delete document.documentElement.dataset.style;
+    else document.documentElement.dataset.style = s;
   };
 
   CP.openStyleSheet = function () {
     const cur = CP.getStyle();
+    const names = { apple: '苹果风', liquid: '液态玻璃', vivid: '炫彩玻璃' };
     const opts = [
       { id: 'apple', icon: 'fa-brands fa-apple', name: '苹果风', desc: '默认简洁质感' },
-      { id: 'liquid', icon: 'fas fa-droplet', name: '液态玻璃', desc: '边缘折射 · 毛玻璃' }
+      { id: 'liquid', icon: 'fas fa-droplet', name: '液态玻璃', desc: '柔和光斑 · 边缘折射' },
+      { id: 'vivid', icon: 'fas fa-gem', name: '炫彩玻璃', desc: '鲜艳壁纸 · 强透镜折射' }
     ];
     const box = CP.modal(
       '<h3><i class="fas fa-palette" style="color:var(--primary);margin-right:7px"></i>风格切换</h3>' +
@@ -762,7 +768,7 @@
       CP.applyStyle();
       CP.liquidGlass.reload();
       CP.closeModal();
-      CP.toast(v === 'liquid' ? '已切换为液态玻璃' : '已切换为苹果风', 'success');
+      CP.toast('已切换为' + names[v], 'success');
     });
   };
 
@@ -865,7 +871,7 @@
       requestAnimationFrame(() => { scheduled = false; refresh(); });
     }
     function refresh() {
-      if (CP.getStyle() !== 'liquid') return;
+      if (CP.getStyle() === 'apple') return;
       document.querySelectorAll(SELECTOR).forEach(el => {
         if (ro) ro.observe(el);
         if (el.isConnected) build(el);
@@ -889,7 +895,7 @@
     }
     function reload() {
       stop();
-      if (CP.getStyle() === 'liquid') start();
+      if (CP.getStyle() !== 'apple') start();
     }
     return { start, stop, reload, refresh };
   })();
@@ -1068,6 +1074,6 @@
   CP.bindImageGuard();
   CP.registerSW();
   CP.loadBootstrap();
-  if (CP.getStyle() === 'liquid') CP.liquidGlass.start();
+  if (CP.getStyle() !== 'apple') CP.liquidGlass.start();
 
 })();
