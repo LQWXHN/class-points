@@ -465,20 +465,22 @@ table.cp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 /* ---------- 液态玻璃主题（html[data-style="liquid"]） ---------- */
 html[data-style="liquid"] {
-  --surface-solid: rgba(255, 255, 255, .55);
-  --surface: rgba(255, 255, 255, .42);
-  --lg-edge: rgba(255, 255, 255, .55);
-  --lg-shadow: 0 4px 12px rgba(0, 0, 0, .10), 0 -10px 25px inset rgba(0, 0, 0, .06), inset 0 1px 1px rgba(255, 255, 255, .55);
-  --lg-backdrop: blur(22px) saturate(180%);
+  --surface-solid: rgba(255, 255, 255, .10);
+  --surface: rgba(255, 255, 255, .07);
+  --lg-edge: rgba(255, 255, 255, .60);
+  --lg-shadow: 0 12px 32px rgba(50, 40, 100, .16), inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 0 0 1px rgba(255, 255, 255, .22), inset 0 -1px 0 rgba(120, 160, 255, .28);
+  --lg-backdrop: blur(5px) saturate(180%) brightness(1.05);
 }
 html[data-style="liquid"] body { background: transparent; }
 html[data-style="liquid"] body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(58% 52% at 18% 22%, rgba(255, 140, 175, .6), transparent 68%),
-    radial-gradient(60% 58% at 82% 26%, rgba(125, 195, 255, .6), transparent 68%),
-    radial-gradient(64% 60% at 55% 84%, rgba(255, 205, 120, .55), transparent 68%),
-    linear-gradient(180deg, #eef1f6, #e7ebf2);
+    radial-gradient(58% 56% at 8% 6%, rgba(255, 140, 182, .92), rgba(255, 140, 182, .32) 50%, transparent 72%),
+    radial-gradient(56% 54% at 94% 6%, rgba(110, 180, 255, .92), rgba(110, 180, 255, .32) 50%, transparent 72%),
+    radial-gradient(60% 58% at 86% 96%, rgba(172, 142, 255, .86), rgba(172, 142, 255, .30) 50%, transparent 72%),
+    radial-gradient(58% 56% at 8% 96%, rgba(255, 190, 120, .86), rgba(255, 190, 120, .30) 50%, transparent 72%),
+    radial-gradient(46% 44% at 46% 42%, rgba(104, 226, 206, .62), rgba(104, 226, 206, .18) 50%, transparent 68%),
+    linear-gradient(160deg, #eef3fa, #e0e7f4);
 }
 html[data-style="liquid"] .card,
 html[data-style="liquid"] .side,
@@ -491,21 +493,28 @@ html[data-style="liquid"] .site-switch-pop {
   border: 1px solid var(--lg-edge);
   box-shadow: var(--lg-shadow);
 }
+html[data-style="liquid"] .card:not(.stu-card):not(.grp-card):not(.top-stat) {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 html[data-style="liquid"] .stu-card.selected { border-color: var(--primary); }
 html[data-style="liquid"] .glass { background: var(--surface); border-color: var(--lg-edge); }
 @media (prefers-color-scheme: dark) {
   html[data-style="liquid"] {
-    --surface-solid: rgba(30, 30, 32, .55);
-    --surface: rgba(30, 30, 32, .42);
-    --lg-edge: rgba(255, 255, 255, .14);
-    --lg-shadow: 0 4px 12px rgba(0, 0, 0, .5), 0 -10px 25px inset rgba(0, 0, 0, .3), inset 0 1px 1px rgba(255, 255, 255, .14);
+    --surface-solid: rgba(20, 20, 24, .20);
+    --surface: rgba(20, 20, 24, .14);
+    --lg-edge: rgba(255, 255, 255, .22);
+    --lg-shadow: 0 12px 32px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .50), inset 0 0 0 1px rgba(255, 255, 255, .14), inset 0 -1px 0 rgba(130, 170, 255, .30);
+    --lg-backdrop: blur(5px) saturate(180%) brightness(1.05);
   }
   html[data-style="liquid"] body::before {
     background:
-      radial-gradient(58% 52% at 18% 22%, rgba(255, 86, 134, .45), transparent 68%),
-      radial-gradient(60% 58% at 82% 26%, rgba(64, 140, 255, .5), transparent 68%),
-      radial-gradient(64% 60% at 55% 84%, rgba(255, 186, 84, .38), transparent 68%),
-      linear-gradient(180deg, #15151a, #0a0a0d);
+      radial-gradient(48% 56% at 14% 16%, rgba(255, 92, 140, .75), rgba(255, 92, 140, .22) 52%, transparent 68%),
+      radial-gradient(52% 58% at 88% 20%, rgba(70, 142, 255, .80), rgba(70, 142, 255, .24) 52%, transparent 68%),
+      radial-gradient(60% 52% at 78% 90%, rgba(148, 118, 250, .65), rgba(148, 118, 250, .20) 52%, transparent 68%),
+      radial-gradient(52% 50% at 18% 88%, rgba(255, 178, 92, .60), rgba(255, 178, 92, .18) 52%, transparent 68%),
+      linear-gradient(160deg, #16141e, #0a090f);
   }
 }
 

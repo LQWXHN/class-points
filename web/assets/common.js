@@ -777,38 +777,69 @@
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SELECTOR = '.stu-card, .grp-card, .top-stat, .modal, .toast, .site-switch-pop, .saying-card';
     const MAX_PIXELS = 480000;
-    const SDF_W = .3, SDF_H = .2, SDF_R = .6;
+    const DEPTH = .55, SPREAD = .45, REFRACTION = .62, DISPERSION = .05, FROST = .03;
     let svgRoot = null, ro = null, mo = null, seq = 0, scheduled = false;
     const registry = new Map();
 
-    function smoothStep(a, b, t) { t = Math.max(0, Math.min(1, (t - a) / (b - a))); return t * t * (3 - 2 * t); }
     function sdf(x, y, w, h, r) {
       const qx = Math.abs(x) - w + r, qy = Math.abs(y) - h + r;
       return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
     }
-    function makeMap(w, h) {
-      const c = document.createElement('canvas'); c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      const data = new Uint8ClampedArray(w * h * 4);
-      const raw = new Float32Array(w * h * 2);
+    function makeOpticsLut(depth) {
+      const n = .65 + depth * .7;
+      const lut = new Float32Array(256);
+      for (let k = 0; k < 256; k++) {
+        const t = (k + .5) / 256;
+        const a = 1 - Math.min(1, Math.max(1e-4, t));
+        const r = Math.pow(1 - Math.pow(a, 4), .25);
+        const ang = Math.atan(n * Math.pow(a, 3) / Math.max(1e-5, Math.pow(r, 3)));
+        const refr = Math.asin(Math.sin(ang) / 1.5);
+        lut[k] = (.45 + n * r) * Math.tan(ang - refr);
+      }
       let max = 0;
-      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
-        const ix = px / w - .5, iy = py / h - .5;
-        const d = sdf(ix, iy, SDF_W, SDF_H, SDF_R);
-        const sc = smoothStep(0, 1, smoothStep(.8, 0, d - .15));
-        const k = (py * w + px) * 2;
-        raw[k] = (ix * sc + .5) * w - px;
-        raw[k + 1] = (iy * sc + .5) * h - py;
-        max = Math.max(max, Math.abs(raw[k]), Math.abs(raw[k + 1]));
+      for (const v of lut) max = Math.max(max, v);
+      for (let k = 0; k < 256; k++) lut[k] /= max;
+      lut[255] = 0;
+      return lut;
+    }
+    function sampleLut(lut, t) {
+      const p = Math.max(0, t * lut.length - .5);
+      const i = Math.floor(p);
+      return lut[i] + ((lut[i + 1] || 0) - lut[i]) * (p - i);
+    }
+    function makeMap(w, h, radius) {
+      const ms = Math.min(1, 400 / Math.max(w, h));
+      const mw = Math.max(2, Math.round(w * ms));
+      const mh = Math.max(2, Math.round(h * ms));
+      const r = Math.min(radius * ms, mw / 2, mh / 2);
+      const c = document.createElement('canvas'); c.width = mw; c.height = mh;
+      const ctx = c.getContext('2d');
+      const data = new Uint8ClampedArray(mw * mh * 4);
+      const band = Math.max(1, Math.min(Math.min(mw, mh) / 2 * .8, (8 + 28 * SPREAD) * ms));
+      const lut = makeOpticsLut(DEPTH);
+      for (let py = 0; py < mh; py++) for (let px = 0; px < mw; px++) {
+        const fx = px + .5 - mw / 2, fy = py + .5 - mh / 2;
+        const d = sdf(fx, fy, mw / 2, mh / 2, r);
+        let dx = 0, dy = 0;
+        if (d < 0 && -d < band) {
+          const e = sampleLut(lut, -d / band);
+          const qx = Math.abs(fx) - (mw / 2 - r), qy = Math.abs(fy) - (mh / 2 - r);
+          if (qx > 0 && qy > 0) {
+            const nn = Math.hypot(qx, qy);
+            dx = -Math.sign(fx) * qx / nn * e;
+            dy = -Math.sign(fy) * qy / nn * e;
+          } else if (qx > qy) dx = -Math.sign(fx) * e;
+          else dy = -Math.sign(fy) * e;
+        }
+        const i = (py * mw + px) * 4;
+        data[i] = 127.5 + 127.5 * dx;
+        data[i + 1] = 127.5 + 127.5 * dy;
+        data[i + 2] = 127.5; data[i + 3] = 255;
       }
-      max *= .5;
-      for (let p = 0, i = 0; i < data.length; i += 4, p += 2) {
-        data[i] = (raw[p] / max + .5) * 255;
-        data[i + 1] = (raw[p + 1] / max + .5) * 255;
-        data[i + 2] = 0; data[i + 3] = 255;
-      }
-      ctx.putImageData(new ImageData(data, w, h), 0, 0);
-      return { url: c.toDataURL(), scale: max };
+      ctx.putImageData(new ImageData(data, mw, mh), 0, 0);
+      let base = REFRACTION * (36 + 36 * DEPTH);
+      base = Math.min(base, .7 * Math.min(w, h));
+      return { url: c.toDataURL(), scale: base };
     }
     function ensureSvg() {
       if (!svgRoot) {
@@ -839,28 +870,59 @@
       if (rec && rec.width === w && rec.height === h) return;
       teardown(el);
       if (w * h > MAX_PIXELS) return;
-      const map = makeMap(w, h);
+      const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+      const map = makeMap(w, h, radius);
       const id = 'lgf' + (++seq);
       const f = document.createElementNS(SVG_NS, 'filter');
       f.id = id;
-      f.setAttribute('filterUnits', 'userSpaceOnUse');
       f.setAttribute('color-interpolation-filters', 'sRGB');
       f.setAttribute('x', '0'); f.setAttribute('y', '0');
-      f.setAttribute('width', w); f.setAttribute('height', h);
+      f.setAttribute('width', '100%'); f.setAttribute('height', '100%');
       const img = document.createElementNS(SVG_NS, 'feImage');
       img.id = id + '_img';
       img.setAttribute('x', '0'); img.setAttribute('y', '0');
       img.setAttribute('width', w); img.setAttribute('height', h);
+      img.setAttribute('preserveAspectRatio', 'none');
       img.setAttribute('href', map.url);
-      const dm = document.createElementNS(SVG_NS, 'feDisplacementMap');
-      dm.setAttribute('in', 'SourceGraphic');
-      dm.setAttribute('in2', '#' + img.id);
-      dm.setAttribute('xChannelSelector', 'R');
-      dm.setAttribute('yChannelSelector', 'G');
-      dm.setAttribute('scale', map.scale);
-      f.appendChild(img); f.appendChild(dm);
+      f.appendChild(img);
+      const scales = [map.scale * (1 - DISPERSION), map.scale, map.scale * (1 + DISPERSION)];
+      const matrices = [
+        '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
+        '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
+        '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'
+      ];
+      for (let k = 0; k < 3; k++) {
+        const dm = document.createElementNS(SVG_NS, 'feDisplacementMap');
+        dm.setAttribute('in', 'SourceGraphic');
+        dm.setAttribute('in2', '#' + img.id);
+        dm.setAttribute('xChannelSelector', 'R');
+        dm.setAttribute('yChannelSelector', 'G');
+        dm.setAttribute('scale', scales[k]);
+        dm.setAttribute('result', 'd' + k);
+        const cm = document.createElementNS(SVG_NS, 'feColorMatrix');
+        cm.setAttribute('in', 'd' + k);
+        cm.setAttribute('type', 'matrix');
+        cm.setAttribute('values', matrices[k]);
+        cm.setAttribute('result', 'ch' + k);
+        f.appendChild(dm); f.appendChild(cm);
+      }
+      const blend1 = document.createElementNS(SVG_NS, 'feBlend');
+      blend1.setAttribute('in', 'ch0'); blend1.setAttribute('in2', 'ch1');
+      blend1.setAttribute('mode', 'screen'); blend1.setAttribute('result', 'rg');
+      const blend2 = document.createElementNS(SVG_NS, 'feBlend');
+      blend2.setAttribute('in', 'rg'); blend2.setAttribute('in2', 'ch2');
+      blend2.setAttribute('mode', 'screen'); blend2.setAttribute('result', 'refracted');
+      const blur = document.createElementNS(SVG_NS, 'feGaussianBlur');
+      blur.setAttribute('in', 'refracted');
+      blur.setAttribute('stdDeviation', 16 * FROST);
+      blur.setAttribute('result', 'frosted');
+      const sat = document.createElementNS(SVG_NS, 'feColorMatrix');
+      sat.setAttribute('in', 'frosted');
+      sat.setAttribute('type', 'saturate');
+      sat.setAttribute('values', '1.25');
+      f.appendChild(blend1); f.appendChild(blend2); f.appendChild(blur); f.appendChild(sat);
       ensureSvg().appendChild(f);
-      const chain = 'url(#' + id + ') blur(.25px) contrast(1.2) brightness(1.05) saturate(1.1)';
+      const chain = 'url(#' + id + ')';
       el.style.webkitBackdropFilter = chain;
       el.style.backdropFilter = chain;
       registry.set(el, { width: w, height: h, filter: f });
