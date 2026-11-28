@@ -1483,14 +1483,16 @@
         <input id="fb-reason" class="form-input" maxlength="50" placeholder="拟造原因"></div>
       <div class="form-row"><label class="form-label">分值（带符号）</label>
         <input id="fb-points" type="number" class="form-input" value="1" style="text-align:center;font-weight:700"></div>
+      <div class="form-row"><label class="form-label">操作者</label>
+        <input id="fb-operator" class="form-input" value="teacher" maxlength="30"></div>
       <div class="form-row"><label class="form-label">时间</label>
-        <input id="fb-time" type="datetime-local" class="form-input"></div>
+        <input id="fb-time" type="datetime-local" step="1" class="form-input"></div>
       <div class="modal-foot">
         <button class="btn" data-act="cancel">取消</button>
         <button class="btn btn-primary" data-act="ok">提交</button>
       </div>`, { size: 'sm' });
     const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
-    box.querySelector('#fb-time').value = now.toISOString().slice(0, 16);
+    box.querySelector('#fb-time').value = now.toISOString().slice(0, 19);
     box.querySelector('#fb-target').onchange = function() {
       box.querySelector('#fb-id-student').style.display = this.value === 'student' ? '' : 'none';
       box.querySelector('#fb-id-group').style.display = this.value === 'group' ? '' : 'none';
@@ -1506,7 +1508,8 @@
       if (!reason) return CP.toast('请填写原因', 'warn');
       if (!Number.isInteger(points) || points === 0) return CP.toast('分值需为非零整数', 'warn');
       try {
-        await CP.api('/points/fabricate', { method: 'POST', body: { target, id: Number(id), reason, points, time } });
+        const operator = (box.querySelector('#fb-operator').value || '').trim() || 'teacher';
+      await CP.api('/points/fabricate', { method: 'POST', body: { target, id: Number(id), reason, points, time, operator } });
         CP.closeModal(); CP.toast('拟造成功', 'success'); loadRecords();
       } catch (e) { CP.failToast(e, '拟造失败'); }
     };

@@ -121,6 +121,7 @@ export function pointsRoutes() {
     const reason = String(body.reason || '').slice(0, 200);
     const points = parseInt(body.points) || 0;
     const time = Number(body.time) || now();
+    const operator = String(body.operator || '').trim().slice(0, 30) || me.username;
     if (!target || !id || !reason || points === 0) {
       return c.json({ ok: false, error: '缺少必填参数' }, 400);
     }
@@ -158,14 +159,14 @@ export function pointsRoutes() {
         uid: recUid, student_id: s.id, student_uid: s.uid,
         student_name: s.name, group_name: groupName,
         type, reason, points: absPoints,
-        operator: me.username, apply: 1, hidden: 0,
+        operator, apply: 1, hidden: 0,
         created_at: time, fabricated: 1,
       };
       await db.run(
         `INSERT INTO point_records (uid, student_id, student_uid, student_name, group_name, type, reason, points, operator, apply, hidden, created_at, fabricated)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         recUid, s.id, s.uid, s.name, groupName, type, reason, absPoints,
-        me.username, 1, 0, time, 1);
+        operator, 1, 0, time, 1);
       await writeSyncEvent(db, { tbl: 'point_records', row_uid: recUid, op: 'upsert', snapshot: recSnap, apply_delta: 1, origin: ORIGIN(c) });
       results.push({ student_uid: s.uid, student_name: s.name, new_points: newPoints });
     }

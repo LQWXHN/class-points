@@ -226,7 +226,7 @@ async function openFabricateModal() {
   } catch {}
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
-  const defTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const defTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   let type = 'add';
   let curCat = '';
   let sel = null;
@@ -257,8 +257,10 @@ async function openFabricateModal() {
           <button type="button" data-addval="20">+20</button>
         </div></div>
     </div>
+    <div class="form-row"><label class="form-label">操作者</label>
+      <input id="fab-operator" type="text" class="form-input" value="teacher" maxlength="30"></div>
     <div class="form-row"><label class="form-label">时间</label>
-      <input id="fab-time" type="datetime-local" class="form-input" value="${defTime}"></div>
+      <input id="fab-time" type="datetime-local" step="1" class="form-input" value="${defTime}"></div>
     <div class="modal-foot">
       <button class="btn" data-act="cancel">取消</button>
       <button class="btn btn-primary" data-act="ok" disabled><i class="fas fa-wand-magic-sparkles"></i> 拟造</button>
@@ -352,7 +354,8 @@ async function openFabricateModal() {
     if (!time || isNaN(time)) return CP.toast('时间格式不正确', 'warn');
     const btn = box.querySelector('[data-act=ok]'); btn.disabled = true;
     try {
-      await CP.api('/points/fabricate', { method: 'POST', body: { target, id, reason, points: p, time } });
+      const operator = (box.querySelector('#fab-operator').value || '').trim() || 'teacher';
+      await CP.api('/points/fabricate', { method: 'POST', body: { target, id, reason, points: p, time, operator } });
       CP.closeModal();
       CP.toast('已拟造记录', 'success');
       await load(true);
