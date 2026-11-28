@@ -777,7 +777,7 @@
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const SELECTOR = '.stu-card, .grp-card, .top-stat, .modal, .toast, .site-switch-pop, .saying-card';
     const MAX_PIXELS = 480000;
-    const DEPTH = .55, SPREAD = .45, REFRACTION = .62, DISPERSION = .05, FROST = .03;
+    const DEPTH = .55, SPREAD = .45, REFRACTION = .62, DISPERSION = .08, FROST = .03;
     let svgRoot = null, ro = null, mo = null, seq = 0, scheduled = false;
     const registry = new Map();
 
